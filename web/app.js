@@ -264,8 +264,6 @@ const PDFViewerApplication = {
     }
     await this._initializeViewerComponents();
 
-    this.pdfTextExtractor = new PdfTextExtractor(this.externalServices);
-
     // Bind the various event handlers *after* the viewer has been
     // initialized, to prevent errors if an event arrives too soon.
     this.bindEvents();
@@ -531,7 +529,8 @@ const PDFViewerApplication = {
             linkService,
             overlayManager,
             /* ltr = */ l10n.getDirection() === "ltr",
-            hasForcedColors
+            hasForcedColors,
+            abortSignal
           )
         : null;
 
@@ -763,6 +762,7 @@ const PDFViewerApplication = {
         eventBus,
         l10n,
         enableSplitMerge,
+        globalAbortSignal: abortSignal,
       });
       this.viewsManager.onToggled = this.forceRendering.bind(this);
       this.viewsManager.onUpdateThumbnails = () => {
@@ -778,6 +778,17 @@ const PDFViewerApplication = {
           pdfViewer.currentPageNumber
         );
       };
+    }
+
+    if (
+      typeof PDFJSDev === "undefined" ||
+      PDFJSDev.test("TESTING || MOZCENTRAL")
+    ) {
+      this.pdfTextExtractor = new PdfTextExtractor(
+        externalServices,
+        pdfViewer,
+        eventBus
+      );
     }
   },
 
@@ -1151,7 +1162,6 @@ const PDFViewerApplication = {
       this.pdfViewer.setDocument(null);
       this.pdfLinkService.setDocument(null);
       this.pdfDocumentProperties?.setDocument(null);
-      this.pdfTextExtractor?.setViewer(null);
     }
     this.pdfLinkService.externalLinkEnabled = true;
     this.store = null;
@@ -1316,9 +1326,10 @@ const PDFViewerApplication = {
     const { classList } = this.appConfig.appContainer;
     classList.add("wait");
 
-    const structuralChanges = this.pdfThumbnailViewer?.getStructuralChanges();
-    if (structuralChanges) {
-      await this.onSavePages({ data: structuralChanges });
+    if (this.pdfThumbnailViewer?.hasStructuralChanges()) {
+      await this.onSavePages({
+        data: this.pdfThumbnailViewer.getStructuralChanges(),
+      });
     } else {
       await (this.pdfDocument?.annotationStorage.size > 0
         ? this.save()
@@ -1461,7 +1472,6 @@ const PDFViewerApplication = {
 
     const pdfViewer = this.pdfViewer;
     pdfViewer.setDocument(pdfDocument);
-    this.pdfTextExtractor.setViewer(pdfViewer);
     const { firstPagePromise, onePageRendered, pagesPromise } = pdfViewer;
 
     this.pdfThumbnailViewer?.setDocument(pdfDocument);
