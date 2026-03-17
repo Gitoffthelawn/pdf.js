@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
+import { BreakpointType, DrawOpsView } from "./draw_ops_view.js";
 import { CanvasContextDetailsView } from "./canvas_context_details_view.js";
 import { DOMCanvasFactory } from "pdfjs/display/canvas_factory.js";
-import { DrawOpsView } from "./draw_ops_view.js";
 import { SplitView } from "./split_view.js";
 
 // Stepper for pausing/stepping through op list rendering.
@@ -61,10 +61,20 @@ class ViewerStepper {
     cb();
   }
 
+  shouldSkip(i) {
+    return (
+      globalThis.StepperManager._breakpoints.get(i) === BreakpointType.SKIP
+    );
+  }
+
   #findNextAfter(idx) {
     let next = null;
-    for (const bp of globalThis.StepperManager._breakpoints) {
-      if (bp > idx && (next === null || bp < next)) {
+    for (const [bp, type] of globalThis.StepperManager._breakpoints) {
+      if (
+        type === BreakpointType.PAUSE &&
+        bp > idx &&
+        (next === null || bp < next)
+      ) {
         next = bp;
       }
     }
@@ -297,7 +307,10 @@ class PageView {
         const labelEl = document.createElement("div");
         labelEl.className = "temp-canvas-label";
         labelEl.textContent = `${ctxLabel} — ${width}×${height}`;
-        wrapper.append(labelEl, canvasAndCtx.canvas);
+        const checker = document.createElement("div");
+        checker.className = "canvas-checker";
+        checker.append(canvasAndCtx.canvas);
+        wrapper.append(labelEl, checker);
         const entry = { canvasAndCtx, wrapper, labelEl };
         this.#alive.push(entry);
         this.#attachWrapper(entry);
