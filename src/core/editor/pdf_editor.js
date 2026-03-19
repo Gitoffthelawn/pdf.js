@@ -616,15 +616,20 @@ class PDFEditor {
           if (newIndex !== -1) {
             newPageIndex = newIndex++;
           } else {
+            // Find the first available index in the newPages array.
+            // This is needed when the pageIndices option is used since the
+            // pages can be added in any order.
             for (
               newPageIndex = 0;
-              this.oldPages[newPageIndex] === undefined;
+              this.oldPages[newPageIndex] !== undefined;
               newPageIndex++
             ) {
               /* empty */
             }
           }
         }
+        // Reserve the slot immediately because the page fetch is async.
+        this.oldPages[newPageIndex] = null;
         promises.push(
           document.getPage(i).then(page => {
             this.oldPages[newPageIndex] = new PageData(page, documentData);
@@ -1147,6 +1152,17 @@ class PDFEditor {
    */
   #findDuplicateNamedDestinations() {
     const { namedDestinations } = this;
+    const getUniqueDestinationName = name => {
+      if (!namedDestinations.has(name)) {
+        return name;
+      }
+      for (let i = 1; ; i++) {
+        const dedupedName = `${name}_${i}`;
+        if (!namedDestinations.has(dedupedName)) {
+          return dedupedName;
+        }
+      }
+    };
     for (let i = 0, ii = this.oldPages.length; i < ii; i++) {
       const page = this.oldPages[i];
       const {
@@ -1179,7 +1195,7 @@ class PDFEditor {
           continue;
         }
         // Create a new unique named destination.
-        const newName = `${pointingDest}_p${i + 1}`;
+        const newName = getUniqueDestinationName(`${pointingDest}_p${i + 1}`);
         dedupNamedDestinations.set(pointingDest, newName);
         namedDestinations.set(newName, dest);
       }
@@ -1460,6 +1476,7 @@ class PDFEditor {
         this.currentDocument = null;
       }
     }
+    this.#setAcroFormCalculationOrder(allDocumentData);
   }
 
   #setAcroFormQ(allDocumentData) {
@@ -1495,7 +1512,6 @@ class PDFEditor {
   #setAcroFormDefaultBasicValues(allDocumentData) {
     let sigFlags = 0;
     let needAppearances = false;
-    const calculationOrder = [];
     for (const documentData of allDocumentData) {
       if (!documentData.acroForm) {
         continue;
@@ -1507,7 +1523,15 @@ class PDFEditor {
       if (documentData.acroForm.get("NeedAppearances") === true) {
         needAppearances = true;
       }
-      const co = documentData.acroForm.get("CO") || null;
+    }
+    this.acroFormSigFlags = sigFlags;
+    this.acroFormNeedAppearances = needAppearances;
+  }
+
+  #setAcroFormCalculationOrder(allDocumentData) {
+    const calculationOrder = [];
+    for (const documentData of allDocumentData) {
+      const co = documentData.acroForm?.get("CO") || null;
       if (!Array.isArray(co)) {
         continue;
       }
@@ -1519,8 +1543,6 @@ class PDFEditor {
         }
       }
     }
-    this.acroFormSigFlags = sigFlags;
-    this.acroFormNeedAppearances = needAppearances;
     this.acroFormCalculationOrder =
       calculationOrder.length > 0 ? calculationOrder : null;
   }

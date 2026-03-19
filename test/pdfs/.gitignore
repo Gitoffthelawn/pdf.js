@@ -522,6 +522,7 @@
 !issue14048.pdf
 !issue11656.pdf
 !annotation-fileattachment.pdf
+!named_dest_collision_for_editor.pdf
 !annotation-text-widget.pdf
 !issue7454.pdf
 !issue15443.pdf
@@ -886,3 +887,4 @@
 !radial_gradients.pdf
 !outlines_for_editor.pdf
 !mesh_shading_empty.pdf
+!acroform_calculation_order.pdf
