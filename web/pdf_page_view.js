@@ -107,8 +107,8 @@ import { XfaLayerBuilder } from "./xfa_layer_builder.js";
  * @property {boolean} [enableAutoLinking] - Enable creation of hyperlinks from
  *   text that look like URLs. The default value is `true`.
  * @property {CommentManager} [commentManager] - The comment manager instance.
- * @property {PDFPageView} [clonedFrom] - The page view that is cloned
  *   to.
+ * @property {AbortSignal} [abortSignal]
  */
 
 const DEFAULT_LAYER_PROPERTIES =
@@ -136,6 +136,8 @@ const LAYERS_ORDER = new Map([
 ]);
 
 class PDFPageView extends BasePDFPageView {
+  #abortSignal = null;
+
   #annotationMode = AnnotationMode.ENABLE_FORMS;
 
   #canvasWrapper = null;
@@ -172,8 +174,6 @@ class PDFPageView extends BasePDFPageView {
 
   #layers = [null, null, null, null];
 
-  #clonedFrom = null;
-
   /**
    * @param {PDFPageViewOptions} options
    */
@@ -184,6 +184,7 @@ class PDFPageView extends BasePDFPageView {
 
     this.renderingId = "page" + this.id;
     this.#layerProperties = options.layerProperties || DEFAULT_LAYER_PROPERTIES;
+    this.#abortSignal = options.abortSignal || null;
 
     this.pdfPage = null;
     this.pageLabel = null;
@@ -205,7 +206,6 @@ class PDFPageView extends BasePDFPageView {
       options.capCanvasAreaFactor ?? AppOptions.get("capCanvasAreaFactor");
     this.#enableAutoLinking = options.enableAutoLinking !== false;
     this.#commentManager = options.commentManager || null;
-    this.#clonedFrom = options.clonedFrom || null;
 
     this.l10n = options.l10n;
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
@@ -289,6 +289,7 @@ class PDFPageView extends BasePDFPageView {
       defaultViewport: this.viewport,
       id,
       layerProperties: this.#layerProperties,
+      abortSignal: this.#abortSignal,
       scale: this.scale,
       optionalContentConfigPromise: this._optionalContentConfigPromise,
       textLayerMode: this.#textLayerMode,
@@ -301,7 +302,6 @@ class PDFPageView extends BasePDFPageView {
       enableAutoLinking: this.#enableAutoLinking,
       commentManager: this.#commentManager,
       l10n: this.l10n,
-      clonedFrom: this,
     });
     clone.setPdfPage(this.pdfPage.clone(id - 1));
     return clone;
@@ -355,6 +355,7 @@ class PDFPageView extends BasePDFPageView {
     if (this.id === newPageNumber) {
       return;
     }
+    const oldPageNumber = this.id;
     this.id = newPageNumber;
     this.renderingId = `page${newPageNumber}`;
     if (this.pdfPage) {
@@ -368,7 +369,11 @@ class PDFPageView extends BasePDFPageView {
     this._textHighlighter.pageIdx = newPageNumber - 1;
     // Don't update the page index for the draw layer, since it's just used as
     // an identifier.
-    this.annotationEditorLayer?.updatePageIndex(newPageNumber - 1);
+
+    this.#layerProperties.annotationEditorUIManager?.updatePageIndex(
+      oldPageNumber - 1,
+      newPageNumber - 1
+    );
   }
 
   setPdfPage(pdfPage) {
@@ -1056,6 +1061,7 @@ class PDFPageView extends BasePDFPageView {
           this.#addLayer(textLayerDiv, "textLayer");
           this.l10n.resume();
         },
+        abortSignal: this.#abortSignal,
       });
     }
 
@@ -1207,12 +1213,10 @@ class PDFPageView extends BasePDFPageView {
           annotationLayer: this.annotationLayer?.annotationLayer,
           textLayer: this.textLayer,
           drawLayer: this.drawLayer.getDrawLayer(),
-          clonedFrom: this.#clonedFrom?.annotationEditorLayer,
           onAppend: annotationEditorLayerDiv => {
             this.#addLayer(annotationEditorLayerDiv, "annotationEditorLayer");
           },
         });
-        this.#clonedFrom = null;
         this.#renderAnnotationEditorLayer();
       }
     });

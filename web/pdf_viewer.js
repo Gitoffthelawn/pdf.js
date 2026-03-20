@@ -253,6 +253,8 @@ class PDFViewer {
 
   #enableAutoLinking = true;
 
+  #abortSignal = null;
+
   #eventAbortController = null;
 
   #minDurationToUpdateCanvas = 0;
@@ -385,6 +387,7 @@ class PDFViewer {
     }
 
     const { abortSignal } = options;
+    this.#abortSignal = abortSignal || null;
     abortSignal?.addEventListener(
       "abort",
       () => {
@@ -1068,6 +1071,7 @@ class PDFViewer {
             enableAutoLinking: this.#enableAutoLinking,
             minDurationToUpdateCanvas: this.#minDurationToUpdateCanvas,
             commentManager: this.#commentManager,
+            abortSignal: this.#abortSignal,
           });
           this._pages.push(pageView);
         }
@@ -1209,6 +1213,7 @@ class PDFViewer {
       const viewerElement =
         this._scrollMode === ScrollMode.PAGE ? null : this.viewer;
       if (viewerElement) {
+        this.#annotationEditorUIManager?.startUpdatePages();
         const fragment = document.createDocumentFragment();
         for (let i = 0, ii = this.#savedPageViews.length; i < ii; i++) {
           const page = this.#savedPageViews[i];
@@ -1216,6 +1221,7 @@ class PDFViewer {
           fragment.append(page.div);
         }
         viewerElement.replaceChildren(fragment);
+        this.#annotationEditorUIManager?.endUpdatePages();
       }
       this._pages = this.#savedPageViews;
       this.#savedPageViews = null;
@@ -1238,6 +1244,9 @@ class PDFViewer {
     this._currentPageNumber = 0;
     const prevPages = this._pages;
     const newPages = (this._pages = []);
+
+    this.#annotationEditorUIManager?.startUpdatePages();
+
     for (let i = 1, ii = pagesMapper.pagesNumber; i <= ii; i++) {
       const prevPageNumber = pagesMapper.getPrevPageNumber(i);
       if (prevPageNumber < 0) {
@@ -1245,6 +1254,10 @@ class PDFViewer {
         if (hasBeenCut) {
           page.updatePageNumber(i);
         } else {
+          this.#annotationEditorUIManager?.clonePage(
+            -prevPageNumber - 1,
+            i - 1
+          );
           page = page.clone(i);
         }
         newPages.push(page);
@@ -1254,6 +1267,8 @@ class PDFViewer {
       newPages.push(page);
       page.updatePageNumber(i);
     }
+
+    this.#annotationEditorUIManager?.endUpdatePages();
 
     if (type === "paste") {
       this.#copiedPageViews = null;

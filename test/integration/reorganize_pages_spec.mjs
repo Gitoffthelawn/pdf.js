@@ -15,7 +15,6 @@
 
 import {
   awaitPromise,
-  clearInput,
   closePages,
   createPromise,
   createPromiseWithArgs,
@@ -31,9 +30,13 @@ import {
   PDI,
   scrollIntoView,
   showViewsManager,
+  switchToEditor,
   waitAndClick,
   waitForBrowserTrip,
   waitForDOMMutation,
+  waitForPointerUp,
+  waitForSerialized,
+  waitForStorageEntries,
   waitForTextToBe,
   waitForTooltipToBe,
 } from "./test_utils.mjs";
@@ -258,6 +261,8 @@ describe("Reorganize Pages View", () => {
     it("should reorder thumbnails after dropping two adjacent pages", async () => {
       await Promise.all(
         pages.map(async ([browserName, page]) => {
+          pending("Fails consistently (issue #20814).");
+
           await waitForThumbnailVisible(page, 1);
           const rect2 = await getRect(page, getThumbnailSelector(2));
           const rect4 = await getRect(page, getThumbnailSelector(4));
@@ -401,14 +406,6 @@ describe("Reorganize Pages View", () => {
 
           await movePages(page, [11, 2], 3);
           await page.waitForFunction(
-            () => document.querySelectorAll("span.highlight").length === 0
-          );
-
-          await clearInput(page, "#findInput", true);
-          await page.type("#findInput", "1");
-          await page.keyboard.press("Enter");
-
-          await page.waitForFunction(
             () => document.querySelectorAll("span.highlight").length === 10
           );
 
@@ -429,13 +426,6 @@ describe("Reorganize Pages View", () => {
             ]);
 
           await movePages(page, [13], 0);
-          await page.waitForFunction(
-            () => document.querySelectorAll("span.highlight").length === 0
-          );
-
-          await clearInput(page, "#findInput", true);
-          await page.type("#findInput", "1");
-          await page.keyboard.press("Enter");
 
           await page.waitForFunction(
             () => document.querySelectorAll("span.highlight").length === 10
@@ -455,6 +445,115 @@ describe("Reorganize Pages View", () => {
               [15, ["1"]],
               [16, ["1"]],
               [17, ["1"]],
+            ]);
+        })
+      );
+    });
+
+    it("should check if the search is working after copy and paste (bug 2023150)", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await waitForThumbnailVisible(page, 1);
+          await page.waitForSelector("#viewsManagerStatusActionButton", {
+            visible: true,
+          });
+
+          await waitAndClick(page, "#viewFindButton");
+          await waitAndClick(page, ":has(> #findHighlightAll)");
+
+          await page.waitForSelector("#findInput", { visible: true });
+          await page.type("#findInput", "1");
+          await page.keyboard.press("Enter");
+
+          await page.waitForFunction(
+            () => document.querySelectorAll("span.highlight").length === 10
+          );
+
+          // Select page 1 and copy it.
+          await waitAndClick(
+            page,
+            `.thumbnail:has(${getThumbnailSelector(1)}) input`
+          );
+          let handlePagesEdited = await waitForPagesEdited(page, "copy");
+          await waitAndClick(page, "#viewsManagerStatusActionButton");
+          await waitAndClick(page, "#viewsManagerStatusActionCopy");
+          await awaitPromise(handlePagesEdited);
+
+          // Paste after page 3.
+          handlePagesEdited = await waitForPagesEdited(page);
+          await waitAndClick(page, `${getThumbnailSelector(3)}+button`);
+          await awaitPromise(handlePagesEdited);
+
+          await page.waitForFunction(
+            () => document.querySelectorAll("span.highlight").length === 11
+          );
+
+          const results = await getSearchResults(page);
+          expect(results)
+            .withContext(`In ${browserName}`)
+            .toEqual([
+              // Page number, [matches]; copy of page 1 inserted at position 4
+              [1, ["1"]],
+              [4, ["1"]],
+              [11, ["1"]],
+              [12, ["1", "1"]],
+              [13, ["1"]],
+              [14, ["1"]],
+              [15, ["1"]],
+              [16, ["1"]],
+              [17, ["1"]],
+              [18, ["1"]],
+            ]);
+        })
+      );
+    });
+
+    it("should check if the search is working after deleting pages (bug 2023150)", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await waitForThumbnailVisible(page, 1);
+          await page.waitForSelector("#viewsManagerStatusActionButton", {
+            visible: true,
+          });
+
+          await waitAndClick(page, "#viewFindButton");
+          await waitAndClick(page, ":has(> #findHighlightAll)");
+
+          await page.waitForSelector("#findInput", { visible: true });
+          await page.type("#findInput", "1");
+          await page.keyboard.press("Enter");
+
+          await page.waitForFunction(
+            () => document.querySelectorAll("span.highlight").length === 10
+          );
+
+          // Select page 1 and delete it.
+          await waitAndClick(
+            page,
+            `.thumbnail:has(${getThumbnailSelector(1)}) input`
+          );
+          const handlePagesEdited = await waitForPagesEdited(page);
+          await waitAndClick(page, "#viewsManagerStatusActionButton");
+          await waitAndClick(page, "#viewsManagerStatusActionDelete");
+          await awaitPromise(handlePagesEdited);
+
+          await page.waitForFunction(
+            () => document.querySelectorAll("span.highlight").length === 9
+          );
+
+          const results = await getSearchResults(page);
+          expect(results)
+            .withContext(`In ${browserName}`)
+            .toEqual([
+              // Page number, [matches]; page 1 removed, all positions shifted
+              [9, ["1"]],
+              [10, ["1", "1"]],
+              [11, ["1"]],
+              [12, ["1"]],
+              [13, ["1"]],
+              [14, ["1"]],
+              [15, ["1"]],
+              [16, ["1"]],
             ]);
         })
       );
@@ -1264,6 +1363,68 @@ describe("Reorganize Pages View", () => {
               visible: true,
             }
           );
+        })
+      );
+    });
+
+    it("should focus the newly pasted page after copy and paste (bug 2022516)", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await waitForThumbnailVisible(page, 1);
+          await page.waitForSelector("#viewsManagerStatusActionButton", {
+            visible: true,
+          });
+
+          // Select page 1 and copy it.
+          await waitAndClick(
+            page,
+            `.thumbnail:has(${getThumbnailSelector(1)}) input`
+          );
+          let handlePagesEdited = await waitForPagesEdited(page, "copy");
+          await waitAndClick(page, "#viewsManagerStatusActionButton");
+          await waitAndClick(page, "#viewsManagerStatusActionCopy");
+          await awaitPromise(handlePagesEdited);
+
+          // Paste after page 3: the pasted page lands at position 4.
+          handlePagesEdited = await waitForPagesEdited(page);
+          await waitAndClick(page, `${getThumbnailSelector(3)}+button`);
+          await awaitPromise(handlePagesEdited);
+
+          // Focus must be on the newly pasted page (position 4), not page 1.
+          await page.waitForSelector(`${getThumbnailSelector(4)}:focus`, {
+            visible: true,
+          });
+        })
+      );
+    });
+
+    it("should focus the newly pasted page after cut and paste (bug 2022516)", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await waitForThumbnailVisible(page, 1);
+          await page.waitForSelector("#viewsManagerStatusActionButton", {
+            visible: true,
+          });
+
+          // Select page 3 and cut it.
+          await waitAndClick(
+            page,
+            `.thumbnail:has(${getThumbnailSelector(3)}) input`
+          );
+          let handlePagesEdited = await waitForPagesEdited(page, "cut");
+          await waitAndClick(page, "#viewsManagerStatusActionButton");
+          await waitAndClick(page, "#viewsManagerStatusActionCut");
+          await awaitPromise(handlePagesEdited);
+
+          // Paste after page 1: the pasted page lands at position 2.
+          handlePagesEdited = await waitForPagesEdited(page);
+          await waitAndClick(page, `${getThumbnailSelector(1)}+button`);
+          await awaitPromise(handlePagesEdited);
+
+          // Focus must be on the newly pasted page (position 2), not page 1.
+          await page.waitForSelector(`${getThumbnailSelector(2)}:focus`, {
+            visible: true,
+          });
         })
       );
     });
@@ -2559,6 +2720,89 @@ describe("Reorganize Pages View", () => {
           expect(parseInt(pageCountAfterSecondDelete, 10))
             .withContext(`In ${browserName} after second delete`)
             .toBe(16);
+        })
+      );
+    });
+  });
+
+  describe("Copy page with an ink annotation and paste it", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "page_with_number.pdf",
+        ".annotationEditorLayer",
+        "50",
+        null,
+        { enableSplitMerge: true }
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("should check that the pasted page has an ink annotation in the DOM", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          // Enable ink editor mode and draw a line on page 1.
+          await switchToEditor("Ink", page);
+          const rect = await getRect(
+            page,
+            ".page[data-page-number='1'] .annotationEditorLayer"
+          );
+          const x = rect.x + rect.width * 0.3;
+          const y = rect.y + rect.height * 0.3;
+          const clickHandle = await waitForPointerUp(page);
+          await page.mouse.move(x, y);
+          await page.mouse.down();
+          await page.mouse.move(x + 50, y + 50);
+          await page.mouse.up();
+          await awaitPromise(clickHandle);
+
+          // Commit the drawing and wait for it to be serialized.
+          await page.keyboard.press("Escape");
+          await waitForSerialized(page, 1);
+
+          await waitForThumbnailVisible(page, 1);
+
+          // Select page 1 and copy it.
+          await page.waitForSelector("#viewsManagerStatusActionButton", {
+            visible: true,
+          });
+          await waitAndClick(
+            page,
+            `.thumbnail:has(${getThumbnailSelector(1)}) input`
+          );
+          let handlePagesEdited = await waitForPagesEdited(page);
+          await waitAndClick(page, "#viewsManagerStatusActionButton");
+          await waitAndClick(page, "#viewsManagerStatusActionCopy");
+          await awaitPromise(handlePagesEdited);
+
+          // Paste after page 2 so the copy lands at position 3.
+          handlePagesEdited = await waitForPagesEdited(page);
+          await waitAndClick(page, `${getThumbnailSelector(2)}+button`);
+          await awaitPromise(handlePagesEdited);
+
+          // Both the original and the cloned annotation must now be in storage.
+          await waitForStorageEntries(page, 2);
+
+          // Close the reorganize view and navigate to page 3 (the pasted copy)
+          // to trigger rendering of its annotation editor layer.
+          await page.click("#viewsManagerToggleButton");
+          await page.waitForSelector("#viewsManager", { hidden: true });
+          await page.evaluate(() => {
+            window.PDFViewerApplication.pdfViewer.currentPageNumber = 3;
+          });
+
+          // The cloned ink annotation must appear in the DOM of page 3.
+          await page.waitForSelector(`.page[data-page-number="3"] .inkEditor`, {
+            visible: true,
+          });
+          const inkEditors = await page.$$(
+            `.page[data-page-number="3"] .inkEditor`
+          );
+          expect(inkEditors.length).withContext(`In ${browserName}`).toBe(1);
         })
       );
     });

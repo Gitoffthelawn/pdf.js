@@ -16,16 +16,21 @@
 /** @typedef {import("../document.js").PDFDocument} PDFDocument */
 /** @typedef {import("../document.js").Page} Page */
 /** @typedef {import("../xref.js").XRef} XRef */
+/** @typedef {import("../worker.js").WorkerTask} WorkerTask */
+// eslint-disable-next-line max-len
+/** @typedef {import("../../shared/message_handler.js").MessageHandler} MessageHandler */
 
 import {
   deepCompare,
   getInheritableProperty,
+  getNewAnnotationsMap,
   stringToAsciiOrUTF16BE,
 } from "../core_utils.js";
 import { Dict, isName, Name, Ref, RefSet, RefSetCache } from "../primitives.js";
 import { getModificationDate, stringToPDFString } from "../../shared/util.js";
 import { incrementalUpdate, writeValue } from "../writer.js";
 import { NameTree, NumberTree } from "../name_number_tree.js";
+import { AnnotationFactory } from "../annotation.js";
 import { BaseStream } from "../base_stream.js";
 import { StringStream } from "../stream.js";
 
@@ -75,8 +80,9 @@ class DocumentData {
 }
 
 class XRefWrapper {
-  constructor(entries) {
+  constructor(entries, getNewRef) {
     this.entries = entries;
+    this._getNewRef = getNewRef;
   }
 
   fetch(ref) {
@@ -94,10 +100,16 @@ class XRefWrapper {
   fetchAsync(ref) {
     return Promise.resolve(this.fetch(ref));
   }
+
+  getNewTemporaryRef() {
+    return this._getNewRef();
+  }
 }
 
 class PDFEditor {
   hasSingleFile = false;
+
+  #newAnnotationsParams = null;
 
   currentDocument = null;
 
@@ -107,7 +119,7 @@ class PDFEditor {
 
   xref = [null];
 
-  xrefWrapper = new XRefWrapper(this.xref);
+  xrefWrapper = new XRefWrapper(this.xref, () => this.newRef);
 
   newRefCount = 1;
 
@@ -249,7 +261,8 @@ class PDFEditor {
         obj = obj.slice();
       }
       for (let i = 0, ii = obj.length; i < ii; i++) {
-        const postponedActions = postponedRefCopies.get(obj[i]);
+        const postponedActions =
+          obj[i] instanceof Ref && postponedRefCopies.get(obj[i]);
         if (postponedActions) {
           // The object is a reference that needs to be copied later.
           postponedActions.push(ref => (obj[i] = ref));
@@ -277,7 +290,8 @@ class PDFEditor {
     }
     if (dict) {
       for (const [key, rawObj] of dict.getRawEntries()) {
-        const postponedActions = postponedRefCopies.get(rawObj);
+        const postponedActions =
+          rawObj instanceof Ref && postponedRefCopies.get(rawObj);
         if (postponedActions) {
           // The object is a reference that needs to be copied later.
           postponedActions.push(ref => dict.set(key, ref));
@@ -535,13 +549,33 @@ class PDFEditor {
   /**
    * Extract pages from the given documents.
    * @param {Array<PageInfo>} pageInfos
+   * @param {Object} annotationStorage - The annotation storage containing the
+   *  annotations to be merged into the new document.
+   * @param {MessageHandler} handler - The message handler to use for processing
+   *  the annotations.
+   * @param {WorkerTask} task - The worker task to use for reporting progress
+   *  and cancellation.
    * @return {Promise<void>}
    */
-  async extractPages(pageInfos) {
+  async extractPages(pageInfos, annotationStorage, handler, task) {
     const promises = [];
     let newIndex = 0;
     this.hasSingleFile = pageInfos.length === 1;
     const allDocumentData = [];
+
+    if (annotationStorage) {
+      this.#newAnnotationsParams = {
+        handler,
+        task,
+        newAnnotationsByPage: getNewAnnotationsMap(annotationStorage),
+        imagesPromises: AnnotationFactory.generateImages(
+          annotationStorage.values(),
+          this.xrefWrapper,
+          true
+        ),
+      };
+    }
+
     for (const {
       document,
       includePages,
@@ -1083,7 +1117,7 @@ class PDFEditor {
 
       // Fix the ID tree.
       for (const [id, nodeRef] of idTree || []) {
-        const newNodeRef = oldRefMapping.get(nodeRef);
+        const newNodeRef = nodeRef instanceof Ref && oldRefMapping.get(nodeRef);
         const newId = dedupIDs.get(id) || id;
         if (newNodeRef) {
           newIdTree.set(newId, newNodeRef);
@@ -1137,7 +1171,7 @@ class PDFEditor {
       const newDestinations = (documentData.destinations = new Map());
       for (const [key, dest] of Object.entries(destinations)) {
         const pageRef = dest[0];
-        const pageData = pagesMap.get(pageRef);
+        const pageData = pageRef instanceof Ref && pagesMap.get(pageRef);
         if (!pageData) {
           continue;
         }
@@ -1537,7 +1571,7 @@ class PDFEditor {
       }
       const { oldRefMapping } = documentData;
       for (const coRef of co) {
-        const newCoRef = oldRefMapping.get(coRef);
+        const newCoRef = coRef instanceof Ref && oldRefMapping.get(coRef);
         if (newCoRef) {
           calculationOrder.push(newCoRef);
         }
@@ -1930,6 +1964,8 @@ class PDFEditor {
       await this.#collectDependencies(resources, true, xref)
     );
 
+    let newAnnots = null;
+
     if (annotations) {
       const newAnnotations = await this.#collectDependencies(
         annotations,
@@ -1937,8 +1973,34 @@ class PDFEditor {
         xref
       );
       this.#fixNamedDestinations(newAnnotations, dedupNamedDestinations);
-      pageDict.setIfArray("Annots", newAnnotations);
+      if (Array.isArray(newAnnotations) && newAnnotations.length > 0) {
+        newAnnots = newAnnotations;
+      }
     }
+
+    const newAnnotations =
+      this.#newAnnotationsParams?.newAnnotationsByPage.get(pageIndex);
+    if (newAnnotations) {
+      const { handler, task, imagesPromises } = this.#newAnnotationsParams;
+      const changes = new RefSetCache();
+      const newData = await AnnotationFactory.saveNewAnnotations(
+        page.createAnnotationEvaluator(handler),
+        this.xrefWrapper,
+        task,
+        newAnnotations,
+        imagesPromises,
+        changes
+      );
+      for (const [ref, { data }] of changes.items()) {
+        this.xref[ref.num] = data;
+      }
+      newAnnots ||= [];
+      for (const { ref } of newData.annotations) {
+        newAnnots.push(ref);
+      }
+    }
+
+    pageDict.setIfArray("Annots", newAnnots);
 
     if (this.useObjectStreams) {
       const newLastRef = this.newRefCount;
