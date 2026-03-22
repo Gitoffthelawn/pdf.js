@@ -14012,5 +14012,21 @@
     "md5": "321f0901af604a6052baa7b2855a7e3e",
     "rounds": 1,
     "type": "text"
+  },
+  {
+    "id": "issue20872",
+    "file": "pdfs/issue20872.pdf",
+    "md5": "2394eea595990d0148b209fe49f035e5",
+    "rounds": 1,
+    "link": true,
+    "type": "eq"
+  },
+  {
+    "id": "issue20914",
+    "file": "pdfs/issue20914.pdf",
+    "md5": "5740b4600e40c6fc920d38f96a74c6a5",
+    "rounds": 1,
+    "link": true,
+    "type": "eq"
   }
 ]
