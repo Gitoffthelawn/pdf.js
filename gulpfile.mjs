@@ -621,8 +621,8 @@ function createStandardFontBundle() {
   );
 }
 
-function createWasmBundle() {
-  return ordered([
+function createWasmBundle({ includeQuickJS = true } = {}) {
+  const sources = [
     gulp.src(
       [
         "external/openjpeg/*.wasm",
@@ -649,7 +649,22 @@ function createWasmBundle() {
         encoding: false,
       }
     ),
-  ]);
+  ];
+  if (includeQuickJS) {
+    sources.push(
+      gulp.src(
+        [
+          "external/quickjs/quickjs-eval.js",
+          "external/quickjs/quickjs-eval.wasm",
+        ],
+        {
+          base: "external/quickjs",
+          encoding: false,
+        }
+      )
+    );
+  }
+  return ordered(sources);
 }
 
 function checkFile(filePath) {
@@ -1506,7 +1521,9 @@ gulp.task(
         createStandardFontBundle().pipe(
           gulp.dest(MOZCENTRAL_CONTENT_DIR + "web/standard_fonts")
         ),
-        createWasmBundle().pipe(gulp.dest(MOZCENTRAL_CONTENT_DIR + "web/wasm")),
+        createWasmBundle({ includeQuickJS: false }).pipe(
+          gulp.dest(MOZCENTRAL_CONTENT_DIR + "web/wasm")
+        ),
 
         preprocessHTML("web/viewer.html", defines).pipe(
           gulp.dest(MOZCENTRAL_CONTENT_DIR + "web")
@@ -2128,6 +2145,23 @@ gulp.task(
     setTestEnv,
     "generic-legacy",
     "lib-legacy",
+    function downloadPDFs(done) {
+      console.log("\n### Downloading PDFs");
+
+      const PDF_TEST = process.env.PDF_TEST || "test_manifest.json";
+      const args = ["test.mjs", "--manifestFile=" + PDF_TEST, "--downloadOnly"];
+
+      const testProcess = startNode(args, {
+        cwd: TEST_DIR,
+        stdio: "inherit",
+      });
+      testProcess.on("close", function (code) {
+        if (code !== 0) {
+          done(new Error(`Downloading PDFs failed.`));
+        }
+        done();
+      });
+    },
     function runUnitTestCli(done) {
       const useCoverage = process.argv.includes("--coverage");
 
@@ -2401,7 +2435,12 @@ gulp.task(
     },
     function watchWasm() {
       gulp.watch(
-        ["external/openjpeg/*", "external/qcms/*", "external/jbig2/*"],
+        [
+          "external/openjpeg/*",
+          "external/qcms/*",
+          "external/jbig2/*",
+          "external/quickjs/*",
+        ],
         { ignoreInitial: false },
         gulp.series("dev-wasm")
       );
@@ -2412,7 +2451,6 @@ gulp.task(
           "src/pdf.{sandbox,sandbox.external,scripting}.js",
           "src/scripting_api/*.js",
           "src/shared/scripting_utils.js",
-          "external/quickjs/*.js",
         ],
         { ignoreInitial: false },
         gulp.series("dev-sandbox")
