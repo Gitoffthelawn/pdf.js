@@ -287,7 +287,8 @@ class PDFThumbnailViewer {
                 parseInt(
                   e.target
                     .closest(".thumbnailImageContainer")
-                    ?.parentElement.getAttribute("page-number")
+                    ?.parentElement.getAttribute("page-number"),
+                  10
                 ) ?? -1,
               hasSelectedPages: !!this.#selectedPages?.size,
               canDeletePages: this.#canDelete(),
@@ -1547,12 +1548,9 @@ class PDFThumbnailViewer {
   }
 
   #goToPage(e) {
-    const { target } = e;
-    if (target.classList.contains("thumbnailImageContainer")) {
-      const pageNumber = parseInt(
-        target.parentElement.getAttribute("page-number"),
-        10
-      );
+    const container = e.target.closest(".thumbnailImageContainer");
+    if (container) {
+      const pageNumber = parseInt(container.getAttribute("page-number"), 10);
       this.linkService.goToPage(pageNumber);
       stopEvent(e);
     }
