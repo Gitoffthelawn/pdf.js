@@ -893,7 +893,7 @@ describe("api", function () {
       const pdfDocument = await Promise.race([loadingTask.promise, promise]);
       expect(pdfDocument?.numPages).toEqual(1);
 
-      loadingTask._worker.destroy();
+      await loadingTask.destroy();
     });
   });
 
@@ -1119,6 +1119,8 @@ describe("api", function () {
 
     afterAll(async function () {
       await pdfLoadingTask.destroy();
+      pdfDocument = null;
+      pdfLoadingTask = null;
     });
 
     function findNode(parent, node, index, check) {
@@ -1271,7 +1273,7 @@ describe("api", function () {
       const pageIndex = await pdfDoc.getPageIndex(ref);
       expect(pageIndex).toEqual(499);
 
-      await pdfDoc.destroy();
+      await loadingTask.destroy();
     });
 
     it("gets invalid page index", async function () {
@@ -2382,9 +2384,12 @@ describe("api", function () {
       );
       const pdfDoc = await loadingTask.promise;
       const markInfo = await pdfDoc.getMarkInfo();
+
       expect(markInfo.Marked).toEqual(true);
       expect(markInfo.UserProperties).toEqual(false);
       expect(markInfo.Suspects).toEqual(false);
+
+      await loadingTask.destroy();
     });
 
     it("gets data", async function () {
@@ -3362,6 +3367,9 @@ describe("api", function () {
 
     afterAll(async function () {
       await pdfLoadingTask.destroy();
+      page = null;
+      pdfDocument = null;
+      pdfLoadingTask = null;
     });
 
     it("gets page number", function () {
@@ -4825,13 +4833,12 @@ have written that much by now. So, here’s to squashing bugs.`);
 
     it("caches image resources at the document/page level as expected (issue 11878)", async function () {
       const { NUM_PAGES_THRESHOLD } = GlobalImageCache,
-        EXPECTED_WIDTH = 2550,
-        EXPECTED_HEIGHT = 3300;
+        EXPECTED_WIDTH = 1,
+        EXPECTED_HEIGHT = 1;
 
       const loadingTask = getDocument(
-        buildGetDocumentParams("issue11878.pdf", {
+        buildGetDocumentParams("issue11878_reduced.pdf", {
           isOffscreenCanvasSupported: false,
-          pdfBug: true,
         })
       );
       const pdfDoc = await loadingTask.promise;
@@ -4886,8 +4893,7 @@ have written that much by now. So, here’s to squashing bugs.`);
           expect(firstImgData.height).toEqual(EXPECTED_HEIGHT);
 
           expect(firstImgData.kind).toEqual(ImageKind.RGB_24BPP);
-          expect(firstImgData.data).toBeInstanceOf(Uint8ClampedArray);
-          expect(firstImgData.data.length).toEqual(25245000);
+          expect(firstImgData.data).toEqual(new Uint8Array([255, 0, 0]));
         } else {
           const objsPool = i >= NUM_PAGES_THRESHOLD ? commonObjs : objs;
           const currentImgData = objsPool.get(objId);
@@ -4898,24 +4904,19 @@ have written that much by now. So, here’s to squashing bugs.`);
           expect(currentImgData.height).toEqual(firstImgData.height);
 
           expect(currentImgData.kind).toEqual(firstImgData.kind);
-          expect(currentImgData.data).toBeInstanceOf(Uint8ClampedArray);
-          expect(
-            currentImgData.data.every(
-              (value, index) => value === firstImgData.data[index]
-            )
-          ).toEqual(true);
+          expect(currentImgData.data).toEqual(firstImgData.data);
 
           if (i === NUM_PAGES_THRESHOLD) {
-            // Ensure that the image was copied in the main-thread (into
-            // commonObjs), rather than being re-parsed in the worker-thread.
+            // Given the small image size, and its lack of SMask/Mask data,
+            // the image should *not* be copied in the main-thread.
             checkedCopyLocalImage = currentImgData.CopyLocalImage;
           }
         }
       }
-      expect(checkedCopyLocalImage).toBeTruthy();
+      expect(checkedCopyLocalImage).toBeFalsy();
 
-      await loadingTask.destroy();
       firstImgData = null;
+      await loadingTask.destroy();
     });
 
     it("caches image resources at the document/page level, with main-thread copying of complex images (issue 11518)", async function () {
@@ -5538,6 +5539,8 @@ a dynamic compiler for JavaScript based on our`);
 ular since they are expressive, accessible to non-experts, and make
 deployment as easy as distributing a source ﬁle. They are used for
 small scripts as well as for`);
+
+      await loadingTask.destroy();
     });
   });
 
@@ -5955,6 +5958,8 @@ small scripts as well as for`);
         const pdfPage = await pdfDoc.getPage(3);
         const annots = await pdfPage.getAnnotations();
         expect(annots.length).toEqual(0);
+
+        await loadingTask.destroy();
       });
     });
 
