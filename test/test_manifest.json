@@ -1957,6 +1957,42 @@
     "type": "eq"
   },
   {
+    "id": "issue20433-initial",
+    "file": "pdfs/issue20433.pdf",
+    "md5": "3a550da7807540982ed457397667db79",
+    "link": true,
+    "rounds": 1,
+    "firstPage": 2,
+    "type": "eq",
+    "forms": true
+  },
+  {
+    "id": "issue20433-no-form",
+    "file": "pdfs/issue20433.pdf",
+    "md5": "3a550da7807540982ed457397667db79",
+    "link": true,
+    "rounds": 1,
+    "firstPage": 2,
+    "type": "eq",
+    "forms": true,
+    "optionalContent": {
+      "73R": false
+    }
+  },
+  {
+    "id": "issue20433-no-mathml",
+    "file": "pdfs/issue20433.pdf",
+    "md5": "3a550da7807540982ed457397667db79",
+    "link": true,
+    "rounds": 1,
+    "firstPage": 2,
+    "type": "eq",
+    "forms": true,
+    "optionalContent": {
+      "115R": false
+    }
+  },
+  {
     "id": "issue13845",
     "file": "pdfs/issue13845.pdf",
     "md5": "7c6b675f61ae68a2e416f4aa26da567c",
@@ -14260,5 +14296,29 @@
     "rounds": 1,
     "type": "eq",
     "about": "Non-isolated knockout group with a nested non-isolated subgroup over existing text."
+  },
+  {
+    "id": "Embedded_font.pdf",
+    "file": "pdfs/Embedded_font.pdf",
+    "md5": "b68dd5a3e6833d1af94e295fe1d60285",
+    "rounds": 1,
+    "type": "eq"
+  },
+  {
+    "id": "issue18548_reduced",
+    "file": "pdfs/issue18548_reduced.pdf",
+    "md5": "39d15f7f810bd89a4e5858df9c75ca4e",
+    "rounds": 1,
+    "type": "eq"
+  },
+  {
+    "id": "issue7625",
+    "file": "pdfs/issue7625.pdf",
+    "md5": "77ca0a41da767dca31ca45219e2ae202",
+    "link": true,
+    "rounds": 1,
+    "firstPage": 1,
+    "lastPage": 1,
+    "type": "eq"
   }
 ]
