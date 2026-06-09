@@ -1321,15 +1321,6 @@ class WidgetAnnotationElement extends AnnotationElement {
     return this.container;
   }
 
-  showElementAndHideCanvas(element) {
-    if (this.data.hasOwnCanvas) {
-      if (element.previousSibling?.nodeName === "CANVAS") {
-        element.previousSibling.hidden = true;
-      }
-      element.hidden = false;
-    }
-  }
-
   _getKeyModifier(event) {
     return FeatureTest.platform.isMac ? event.metaKey : event.ctrlKey;
   }
@@ -1459,7 +1450,7 @@ class WidgetAnnotationElement extends AnnotationElement {
 
     style.color = Util.makeHexColor(...fontColor);
 
-    if (this.data.textAlignment !== null) {
+    if (this.data.textAlignment !== null && !this.data.comb) {
       style.textAlign = TEXT_ALIGNMENT[this.data.textAlignment];
     }
   }
@@ -1547,7 +1538,14 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
         }
       }
       if (this.data.hasOwnCanvas) {
-        element.hidden = true;
+        // The rendered appearance (a canvas) is shown instead of this element.
+        this.container.classList.add("hasOwnCanvas");
+        if (storage.has(id)) {
+          // Once the field is modified, the `sandboxModified` class hides the
+          // (now outdated) canvas and shows this element instead.
+          // The field can already have been modified.
+          this.container.classList.add("sandboxModified");
+        }
       }
       GetElementsByNameSet.add(element);
       this.contentElement = element;
@@ -1637,7 +1635,7 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
         });
 
         element.addEventListener("updatefromsandbox", jsEvent => {
-          this.showElementAndHideCanvas(jsEvent.target);
+          this.container.classList.add("sandboxModified");
           const actions = {
             value(event) {
               elementData.userValue = event.detail.value ?? "";
@@ -1881,7 +1879,30 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
         const combWidth = fieldWidth / maxLen;
 
         element.classList.add("comb");
-        element.style.letterSpacing = `calc(${combWidth}px * var(--total-scale-factor) - 1ch)`;
+        element.style.setProperty(
+          "--comb-width",
+          `calc(${combWidth}px * var(--total-scale-factor))`
+        );
+
+        const alignment = this.data.textAlignment;
+        if (alignment === 1 || alignment === 2) {
+          const setCombOffset = () => {
+            const free = maxLen - element.value.length;
+            element.style.setProperty(
+              "--comb-offset",
+              `${alignment === 1 ? free >> 1 : free}`
+            );
+          };
+          setCombOffset();
+          for (const evt of [
+            "input",
+            "blur",
+            "resetform",
+            "updatefromsandbox",
+          ]) {
+            element.addEventListener(evt, setCombOffset);
+          }
+        }
       }
     } else {
       element = document.createElement("div");
