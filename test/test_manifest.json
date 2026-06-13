@@ -2803,6 +2803,13 @@
     "type": "eq"
   },
   {
+    "id": "issue21436",
+    "file": "pdfs/issue21436.pdf",
+    "md5": "93c4292a52db8a37eefd651cb677d2a9",
+    "rounds": 1,
+    "type": "eq"
+  },
+  {
     "id": "txt2pdf",
     "file": "pdfs/txt2pdf.pdf",
     "md5": "02cefa0f5e8d96313bb05163b2f88c8c",
@@ -14380,5 +14387,23 @@
     "rounds": 1,
     "link": true,
     "type": "eq"
+  },
+  {
+    "id": "bug1802506",
+    "file": "pdfs/bug1802506.pdf",
+    "md5": "ed56da1780b8480262c7329c4419fbb5",
+    "rounds": 1,
+    "type": "eq",
+    "annotations": true,
+    "forms": true
+  },
+  {
+    "id": "checkbox_no_appearance",
+    "file": "pdfs/checkbox_no_appearance.pdf",
+    "md5": "216ff8ea24c470421ff1c528d805caea",
+    "rounds": 1,
+    "type": "eq",
+    "annotations": true,
+    "forms": true
   }
 ]
