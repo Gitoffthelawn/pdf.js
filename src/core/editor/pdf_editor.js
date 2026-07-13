@@ -530,6 +530,14 @@ class PDFEditor {
     return ref;
   }
 
+  async #resolveStructKids(rawKids, xref) {
+    if (rawKids instanceof Ref) {
+      const fetched = await xref.fetchAsync(rawKids);
+      return Array.isArray(fetched) ? fetched : [rawKids];
+    }
+    return Array.isArray(rawKids) ? rawKids : [rawKids];
+  }
+
   async #cloneStructTreeNode(
     parentStructRef,
     node,
@@ -547,19 +555,11 @@ class PDFEditor {
     if (pg instanceof Ref && !pagesMap.has(pg)) {
       return null;
     }
-    let kids;
-    const k = (kids = node.getRaw("K"));
-    if (k instanceof Ref) {
-      // We're only interested by ref referencing nodes and not an array.
-      if (visited.has(k)) {
-        return null;
-      }
-      kids = await xref.fetchAsync(k);
-      if (!Array.isArray(kids)) {
-        kids = [k];
-      }
+    const k = node.getRaw("K");
+    if (k instanceof Ref && visited.has(k)) {
+      return null;
     }
-    kids = Array.isArray(kids) ? kids : [kids];
+    const kids = await this.#resolveStructKids(k, xref);
     const newKids = [];
     const structElemIndices = [];
     for (let kid of kids) {
@@ -620,10 +620,15 @@ class PDFEditor {
         if (!kidRef) {
           continue;
         }
-        const newKidRef = oldRefMapping.get(kidRef);
-        if (!newKidRef) {
+        // Only keep the reference when its target was actually copied. A link
+        // annotation targeting a removed page is dropped, so skip its OBJR.
+        const oldObjRef = kid.getRaw("Obj");
+        if (oldObjRef instanceof Ref && !oldRefMapping.get(oldObjRef)) {
           continue;
         }
+        const newKidRef =
+          oldRefMapping.get(kidRef) ||
+          (await this.#collectDependencies(kidRef, true, xref));
         const newKid = this.xref[newKidRef.num];
         // Fix the missing StructParent entry in the referenced object.
         const objRef = newKid.getRaw("Obj");
@@ -1222,6 +1227,13 @@ class PDFEditor {
             return;
           }
           const action = annotationDict.get("A");
+          if (action instanceof Dict && !isName(action.get("S"), "GoTo")) {
+            // Only GoTo actions point to pages in the current document. Other
+            // actions, such as GoToR, must not be filtered using the current
+            // document's page map.
+            newAnnotations[newAnnotationIndex] = annotationRef;
+            return;
+          }
           const dest =
             action instanceof Dict
               ? action.get("D")
@@ -1233,9 +1245,9 @@ class PDFEditor {
           ) {
             // Keep the annotation as is: it isn't linking to a deleted page.
             newAnnotations[newAnnotationIndex] = annotationRef;
-          } else if (typeof dest === "string") {
+          } else if (dest instanceof Name || typeof dest === "string") {
             const destString = stringToPDFString(
-              dest,
+              dest instanceof Name ? dest.name : dest,
               /* keepEscapeSequence = */ true
             );
             if (destinations.has(destString)) {
@@ -1516,17 +1528,24 @@ class PDFEditor {
       }
 
       // Get the kids.
-      let kids = structTreeRoot.dict.get("K");
-      if (!kids) {
+      const rawKids = structTreeRoot.dict.getRaw("K");
+      if (!rawKids) {
         continue;
       }
-      kids = Array.isArray(kids) ? kids : [kids];
+      const kids = await this.#resolveStructKids(rawKids, xref);
       for (let kid of kids) {
         const kidRef = kid instanceof Ref ? kid : null;
-        if (kidRef && removedStructElements.has(kidRef)) {
+        kid = await xref.fetchIfRefAsync(kid);
+        if (!(kid instanceof Dict)) {
           continue;
         }
-        kid = await xref.fetchIfRefAsync(kid);
+        let setAsSpan = false;
+        if (kidRef && removedStructElements.has(kidRef)) {
+          if (!isName(kid.get("S"), "Link")) {
+            continue;
+          }
+          setAsSpan = true;
+        }
         const newKidRef = await this.#cloneStructTreeNode(
           kidRef,
           kid,
@@ -1538,6 +1557,12 @@ class PDFEditor {
         );
         if (newKidRef) {
           structTreeKids.push(newKidRef);
+          if (kidRef) {
+            oldRefMapping.put(kidRef, newKidRef);
+          }
+          if (setAsSpan) {
+            this.xref[newKidRef.num].setIfName("S", "Span");
+          }
         }
       }
 
@@ -2645,7 +2670,15 @@ class PDFEditor {
   #makeNameNumTree(map, areNames) {
     const allEntries = map.sort(
       areNames
-        ? ([keyA], [keyB]) => keyA.localeCompare(keyB)
+        ? ([keyA], [keyB]) => {
+            if (keyA < keyB) {
+              return -1;
+            }
+            if (keyA > keyB) {
+              return 1;
+            }
+            return 0;
+          }
         : ([keyA], [keyB]) => keyA - keyB
     );
     const maxLeaves =
@@ -2722,7 +2755,7 @@ class PDFEditor {
             /* keepEscapeSequence = */ true
           );
           for (let i = 1; ; i++) {
-            const deduped = `${displayName}_${i}`;
+            const deduped = stringToAsciiOrUTF16BE(`${displayName}_${i}`);
             if (!embeddedFiles.has(deduped)) {
               name = deduped;
               break;
@@ -2768,7 +2801,10 @@ class PDFEditor {
     this.namesDict.set(
       "Dests",
       this.#makeNameNumTree(
-        Array.from(namedDestinations.entries()),
+        Array.from(namedDestinations, ([name, dest]) => [
+          stringToAsciiOrUTF16BE(name),
+          dest,
+        ]),
         /* areNames = */ true
       )
     );
