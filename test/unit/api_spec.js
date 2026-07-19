@@ -1467,9 +1467,11 @@ describe("api", function () {
 
     it("gets destinations, from /Dests dictionary", async function () {
       const destinations = await pdfDocument.getDestinations();
-      expect(destinations).toEqual({
-        chapter1: [{ gen: 0, num: 17 }, { name: "XYZ" }, 0, 841.89, null],
-      });
+      expect(destinations).toEqual(
+        new Map([
+          ["chapter1", [{ gen: 0, num: 17 }, { name: "XYZ" }, 0, 841.89, null]],
+        ])
+      );
     });
 
     it("gets a destination, from /Dests dictionary", async function () {
@@ -1494,10 +1496,12 @@ describe("api", function () {
       const loadingTask = getDocument(buildGetDocumentParams("issue6204.pdf"));
       const pdfDoc = await loadingTask.promise;
       const destinations = await pdfDoc.getDestinations();
-      expect(destinations).toEqual({
-        "Page.1": [{ num: 1, gen: 0 }, { name: "XYZ" }, 0, 375, null],
-        "Page.2": [{ num: 6, gen: 0 }, { name: "XYZ" }, 0, 375, null],
-      });
+      expect(destinations).toEqual(
+        new Map([
+          ["Page.1", [{ num: 1, gen: 0 }, { name: "XYZ" }, 0, 375, null]],
+          ["Page.2", [{ num: 6, gen: 0 }, { name: "XYZ" }, 0, 375, null]],
+        ])
+      );
 
       await loadingTask.destroy();
     });
@@ -1506,11 +1510,13 @@ describe("api", function () {
       const loadingTask = getDocument(buildGetDocumentParams("issue19474.pdf"));
       const pdfDoc = await loadingTask.promise;
       const destinations = await pdfDoc.getDestinations();
-      expect(destinations).toEqual({
-        A: [{ num: 1, gen: 0 }, { name: "Fit" }],
-        B: [{ num: 4, gen: 0 }, { name: "Fit" }],
-        C: [{ num: 5, gen: 0 }, { name: "Fit" }],
-      });
+      expect(destinations).toEqual(
+        new Map([
+          ["A", [{ num: 1, gen: 0 }, { name: "Fit" }]],
+          ["B", [{ num: 4, gen: 0 }, { name: "Fit" }]],
+          ["C", [{ num: 5, gen: 0 }, { name: "Fit" }]],
+        ])
+      );
 
       await loadingTask.destroy();
     });
@@ -6418,7 +6424,10 @@ small scripts as well as for`);
         expect(annotations.length).toEqual(2);
         expect(annotations[0].dest).toEqual("foo");
         expect(annotations[1].unsafeUrl).toEqual("other.pdf#target");
-        expect(Object.keys(await pdfDoc.getDestinations())).toEqual(["foo"]);
+
+        const destinations = await pdfDoc.getDestinations();
+        expect([...destinations.keys()]).toEqual(["foo"]);
+
         await loadingTask.destroy();
       });
 
@@ -6435,7 +6444,8 @@ small scripts as well as for`);
         ];
         let loadingTask = getDocument({ data: assemblePdf(objects) });
         let pdfDoc = await loadingTask.promise;
-        expect(Object.keys(await pdfDoc.getDestinations()))
+        let destinations = await pdfDoc.getDestinations();
+        expect([...destinations.keys()])
           .withContext("before extraction")
           .toEqual(["名"]);
         const data = await pdfDoc.extractPages([{ document: null }]);
@@ -6443,7 +6453,8 @@ small scripts as well as for`);
 
         loadingTask = getDocument({ data });
         pdfDoc = await loadingTask.promise;
-        expect(Object.keys(await pdfDoc.getDestinations()))
+        destinations = await pdfDoc.getDestinations();
+        expect([...destinations.keys()])
           .withContext("after extraction")
           .toEqual(["名"]);
         await loadingTask.destroy();
@@ -6456,7 +6467,7 @@ small scripts as well as for`);
         let pdfDoc = await loadingTask.promise;
 
         let destinations = await pdfDoc.getDestinations();
-        expect(Object.keys(destinations).sort()).toEqual(["foo", "foo_p2"]);
+        expect([...destinations.keys()].sort()).toEqual(["foo", "foo_p2"]);
 
         const data = await pdfDoc.extractPages([
           { document: null },
@@ -6468,7 +6479,7 @@ small scripts as well as for`);
         pdfDoc = await loadingTask.promise;
 
         destinations = await pdfDoc.getDestinations();
-        expect(Object.keys(destinations).sort()).toEqual([
+        expect([...destinations.keys()].sort()).toEqual([
           "foo",
           "foo_p2",
           "foo_p2_1",
@@ -6489,10 +6500,12 @@ small scripts as well as for`);
         let pdfDoc = await loadingTask.promise;
         let pagesRef = await getPageRefs(pdfDoc);
         let destinations = await pdfDoc.getDestinations();
-        expect(destinations).toEqual({
-          "Page.1": [pagesRef[0], { name: "XYZ" }, 0, 375, null],
-          "Page.2": [pagesRef[1], { name: "XYZ" }, 0, 375, null],
-        });
+        expect(destinations).toEqual(
+          new Map([
+            ["Page.1", [pagesRef[0], { name: "XYZ" }, 0, 375, null]],
+            ["Page.2", [pagesRef[1], { name: "XYZ" }, 0, 375, null]],
+          ])
+        );
 
         let data = await pdfDoc.extractPages([
           { document: null },
@@ -6507,12 +6520,14 @@ small scripts as well as for`);
 
         pagesRef = await getPageRefs(pdfDoc);
         destinations = await pdfDoc.getDestinations();
-        expect(destinations).toEqual({
-          "Page.1": [pagesRef[0], { name: "XYZ" }, 0, 375, null],
-          "Page.2": [pagesRef[1], { name: "XYZ" }, 0, 375, null],
-          "Page.1_p3": [pagesRef[2], { name: "XYZ" }, 0, 375, null],
-          "Page.2_p4": [pagesRef[3], { name: "XYZ" }, 0, 375, null],
-        });
+        expect(destinations).toEqual(
+          new Map([
+            ["Page.1", [pagesRef[0], { name: "XYZ" }, 0, 375, null]],
+            ["Page.2", [pagesRef[1], { name: "XYZ" }, 0, 375, null]],
+            ["Page.1_p3", [pagesRef[2], { name: "XYZ" }, 0, 375, null]],
+            ["Page.2_p4", [pagesRef[3], { name: "XYZ" }, 0, 375, null]],
+          ])
+        );
         const expectedDests = ["Page.2", "Page.1", "Page.2_p4", "Page.1_p3"];
         for (let i = 1; i <= 4; i++) {
           const pdfPage = await pdfDoc.getPage(i);
@@ -6534,16 +6549,18 @@ small scripts as well as for`);
 
         pagesRef = await getPageRefs(pdfDoc);
         destinations = await pdfDoc.getDestinations();
-        expect(destinations).toEqual({
-          "Page.1": [pagesRef[0], { name: "XYZ" }, 0, 375, null],
-          "Page.2": [pagesRef[1], { name: "XYZ" }, 0, 375, null],
-          "Page.1_p3": [pagesRef[2], { name: "XYZ" }, 0, 375, null],
-          "Page.2_p4": [pagesRef[3], { name: "XYZ" }, 0, 375, null],
-          "Page.1_p5": [pagesRef[4], { name: "XYZ" }, 0, 375, null],
-          "Page.2_p6": [pagesRef[5], { name: "XYZ" }, 0, 375, null],
-          "Page.1_p3_p7": [pagesRef[6], { name: "XYZ" }, 0, 375, null],
-          "Page.2_p4_p8": [pagesRef[7], { name: "XYZ" }, 0, 375, null],
-        });
+        expect(destinations).toEqual(
+          new Map([
+            ["Page.1", [pagesRef[0], { name: "XYZ" }, 0, 375, null]],
+            ["Page.2", [pagesRef[1], { name: "XYZ" }, 0, 375, null]],
+            ["Page.1_p3", [pagesRef[2], { name: "XYZ" }, 0, 375, null]],
+            ["Page.2_p4", [pagesRef[3], { name: "XYZ" }, 0, 375, null]],
+            ["Page.1_p5", [pagesRef[4], { name: "XYZ" }, 0, 375, null]],
+            ["Page.2_p6", [pagesRef[5], { name: "XYZ" }, 0, 375, null]],
+            ["Page.1_p3_p7", [pagesRef[6], { name: "XYZ" }, 0, 375, null]],
+            ["Page.2_p4_p8", [pagesRef[7], { name: "XYZ" }, 0, 375, null]],
+          ])
+        );
         expectedDests.push(
           "Page.2_p6",
           "Page.1_p5",
@@ -6575,10 +6592,12 @@ small scripts as well as for`);
 
         const pagesRef = await getPageRefs(pdfDoc);
         const destinations = await pdfDoc.getDestinations();
-        expect(destinations).toEqual({
-          "Page.1": [pagesRef[0], { name: "XYZ" }, 0, 375, null],
-          "Page.2": [pagesRef[1], { name: "XYZ" }, 0, 375, null],
-        });
+        expect(destinations).toEqual(
+          new Map([
+            ["Page.1", [pagesRef[0], { name: "XYZ" }, 0, 375, null]],
+            ["Page.2", [pagesRef[1], { name: "XYZ" }, 0, 375, null]],
+          ])
+        );
         const pdfPage = await pdfDoc.getPage(3);
         const annots = await pdfPage.getAnnotations();
         expect(annots.length).toEqual(0);
@@ -6798,6 +6817,79 @@ small scripts as well as for`);
         loadingTask = getDocument({ data });
         pdfDoc = await loadingTask.promise;
         expect(pdfDoc.numPages).toEqual(1);
+        await loadingTask.destroy();
+      });
+
+      it("preserves revisioned structure attributes", async function () {
+        const objects = [
+          "1 0 obj\n<< /Type /Catalog /Pages 2 0 R " +
+            "/StructTreeRoot 4 0 R >>\nendobj\n",
+          "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+          "3 0 obj\n<< /Type /Page /Parent 2 0 R /StructParents 0 " +
+            "/MediaBox [0 0 100 100] >>\nendobj\n",
+          "4 0 obj\n<< /Type /StructTreeRoot /K [5 0 R] " +
+            "/ParentTree 7 0 R /ParentTreeNextKey 1 >>\nendobj\n",
+          "5 0 obj\n<< /Type /StructElem /S /Document /P 4 0 R " +
+            "/K 6 0 R >>\nendobj\n",
+          "6 0 obj\n<< /Type /StructElem /S /P /P 5 0 R /Pg 3 0 R /K 0 " +
+            "/A [<< /O /Layout /Placement /Block >> 0] >>\nendobj\n",
+          "7 0 obj\n<< /Nums [0 [6 0 R]] >>\nendobj\n",
+        ];
+        let loadingTask = getDocument({ data: assemblePdf(objects) });
+        let pdfDoc = await loadingTask.promise;
+        const data = await pdfDoc.extractPages([{ document: null }]);
+        await loadingTask.destroy();
+
+        const pdfString = bytesToString(data);
+        expect(pdfString).toContain("/O /Layout");
+        expect(pdfString).toContain("/Placement");
+        expect(pdfString).toMatch(
+          /\/A\s+\[<<\s+\/O\s+\/Layout\s+\/Placement\s+\/Block>>\s+0\]/
+        );
+
+        loadingTask = getDocument({ data });
+        pdfDoc = await loadingTask.promise;
+        const tree = await (await pdfDoc.getPage(1)).getStructTree();
+        expect(tree.children[0].role).toEqual("Document");
+        expect(tree.children[0].children[0].role).toEqual("P");
+        await loadingTask.destroy();
+      });
+
+      it("remaps indirect table header ids when deduplicating struct trees", async function () {
+        const objects = [
+          "1 0 obj\n<< /Type /Catalog /Pages 2 0 R " +
+            "/StructTreeRoot 4 0 R >>\nendobj\n",
+          "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+          "3 0 obj\n<< /Type /Page /Parent 2 0 R /StructParents 0 " +
+            "/MediaBox [0 0 100 100] >>\nendobj\n",
+          "4 0 obj\n<< /Type /StructTreeRoot /K [5 0 R] " +
+            "/ParentTree 9 0 R /ParentTreeNextKey 1 /IDTree 10 0 R >>\nendobj\n",
+          "5 0 obj\n<< /Type /StructElem /S /Table /P 4 0 R /Pg 3 0 R " +
+            "/K [6 0 R 7 0 R] >>\nendobj\n",
+          "6 0 obj\n<< /Type /StructElem /S /TH /P 5 0 R /Pg 3 0 R " +
+            "/ID (h1) /K 0 >>\nendobj\n",
+          "7 0 obj\n<< /Type /StructElem /S /TD /P 5 0 R /Pg 3 0 R /K 1 " +
+            "/A << /O /Table /Headers [8 0 R] >> >>\nendobj\n",
+          "8 0 obj\n(h1)\nendobj\n",
+          "9 0 obj\n<< /Nums [0 [6 0 R 7 0 R]] >>\nendobj\n",
+          "10 0 obj\n<< /Names [(h1) 6 0 R] >>\nendobj\n",
+        ];
+
+        let loadingTask = getDocument({ data: assemblePdf(objects) });
+        let pdfDoc = await loadingTask.promise;
+        const data = await pdfDoc.extractPages([
+          { document: null },
+          { document: null },
+        ]);
+        await loadingTask.destroy();
+
+        const pdfString = bytesToString(data);
+        expect(pdfString).toContain("/ID (h1_1)");
+        expect(pdfString).toContain("/Headers [(h1_1)]");
+
+        loadingTask = getDocument({ data });
+        pdfDoc = await loadingTask.promise;
+        expect(pdfDoc.numPages).toEqual(2);
         await loadingTask.destroy();
       });
 
@@ -7500,6 +7592,32 @@ small scripts as well as for`);
         const fontIndex = operatorList.fnArray.indexOf(OPS.setFont);
         return fontIndex < 0 ? null : operatorList.argsArray[fontIndex][0];
       };
+
+      it("rebuilds a missing AcroForm Fields array", async function () {
+        const data = assemblePdf([
+          "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm 6 0 R >>\nendobj\n",
+          "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+          "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] " +
+            "/Annots [4 0 R] >>\nendobj\n",
+          "4 0 obj\n<< /Type /Annot /Subtype /Widget /Rect [0 0 20 10] " +
+            "/Parent 5 0 R >>\nendobj\n",
+          "5 0 obj\n<< /FT /Tx /T (group) /Kids [4 0 R] >>\nendobj\n",
+          "6 0 obj\n<< /DA (/Helv 10 Tf) >>\nendobj\n",
+        ]);
+
+        let loadingTask = getDocument({ data });
+        let pdfDoc = await loadingTask.promise;
+        const extracted = await pdfDoc.extractPages([{ document: null }]);
+        expect(extracted).not.toBeNull();
+        await loadingTask.destroy();
+
+        loadingTask = getDocument({ data: extracted });
+        pdfDoc = await loadingTask.promise;
+        expect(Object.keys(await pdfDoc.getFieldObjects())).toEqual(["group"]);
+        const annotations = await (await pdfDoc.getPage(1)).getAnnotations();
+        expect(annotations[0].fieldName).toEqual("group");
+        await loadingTask.destroy();
+      });
 
       it("extract page 2 and check AcroForm Fields T entries", async function () {
         let loadingTask = getDocument(
