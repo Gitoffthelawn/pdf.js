@@ -1760,7 +1760,7 @@ describe("api", function () {
 
     it("gets non-default viewer preferences", async function () {
       const prefs = await pdfDocument.getViewerPreferences();
-      expect(prefs).toEqual({ Direction: "L2R" });
+      expect(prefs).toEqual(new Map([["Direction", "L2R"]]));
     });
 
     it("gets default open action", async function () {
@@ -2803,6 +2803,16 @@ describe("api", function () {
       expect(fingerprints2).toEqual(["04c7126b34a46b6d4d6e7a1eff7edcb6", null]);
 
       await Promise.all([loadingTask1.destroy(), loadingTask2.destroy()]);
+    });
+
+    it("saving should ignore Annotations with null `fieldValue` (issue 21582)", async function () {
+      const loadingTask = getDocument(buildGetDocumentParams("issue21582.pdf"));
+      const pdfDoc = await loadingTask.promise;
+
+      const data = await pdfDoc.saveDocument();
+      expect(data).toBeInstanceOf(Uint8Array);
+
+      await loadingTask.destroy();
     });
 
     it("write a value in an annotation, save the pdf and load it", async function () {
