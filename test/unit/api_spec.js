@@ -22,7 +22,6 @@ import {
   ImageKind,
   InvalidPDFException,
   isNodeJS,
-  objectSize,
   OPS,
   PasswordException,
   PasswordResponses,
@@ -4143,7 +4142,7 @@ describe("api", function () {
       const { items, styles, lang } = await page.getTextContent();
 
       expect(items.length).toEqual(15);
-      expect(objectSize(styles)).toEqual(5);
+      expect(Object.keys(styles).length).toEqual(5);
       expect(lang).toEqual("en");
 
       const text = mergeText(items);
@@ -7727,6 +7726,39 @@ small scripts as well as for`);
         loadingTask = getDocument({ data });
         pdfDoc = await loadingTask.promise;
         expect(Object.keys(await pdfDoc.getFieldObjects())).toEqual(["field"]);
+        await loadingTask.destroy();
+      });
+
+      it("preserves conflicting DAs for inherited text fields", async function () {
+        const makePdf = (fontName, fieldName) =>
+          assemblePdf([
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R " +
+              "/AcroForm 6 0 R >>\nendobj\n",
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R " +
+              "/MediaBox [0 0 100 100] /Annots [4 0 R] >>\nendobj\n",
+            "4 0 obj\n<< /Type /Annot /Subtype /Widget /Rect [0 0 20 10] " +
+              "/Parent 5 0 R >>\nendobj\n",
+            `5 0 obj\n<< /FT /Tx /T (${fieldName}) ` +
+              "/Kids [4 0 R] >>\nendobj\n",
+            `6 0 obj\n<< /Fields [5 0 R] ` +
+              `/DA (/${fontName} 10 Tf) >>\nendobj\n`,
+          ]);
+
+        let loadingTask = getDocument({ data: makePdf("F1", "first") });
+        let pdfDoc = await loadingTask.promise;
+        const data = await pdfDoc.extractPages([
+          { document: null },
+          { document: makePdf("F2", "second") },
+        ]);
+        await loadingTask.destroy();
+
+        loadingTask = getDocument({ data });
+        pdfDoc = await loadingTask.promise;
+        const first = await (await pdfDoc.getPage(1)).getAnnotations();
+        const second = await (await pdfDoc.getPage(2)).getAnnotations();
+        expect(first[0].defaultAppearanceData.fontName).toEqual("F1");
+        expect(second[0].defaultAppearanceData.fontName).toEqual("F2");
         await loadingTask.destroy();
       });
 
