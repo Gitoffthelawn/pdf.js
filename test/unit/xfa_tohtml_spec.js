@@ -463,10 +463,10 @@ describe("XFAFactory", function () {
 
       const pages = await factory.getPages();
       const field1 = searchHtmlNode(pages, "name", "input");
-      expect(field1).not.toEqual(null);
+      expect(field1).not.toBeNull();
 
       const field2 = searchHtmlNode(pages, "name", "textarea");
-      expect(field2).not.toEqual(null);
+      expect(field2).not.toBeNull();
     });
   });
 
@@ -517,7 +517,7 @@ describe("XFAFactory", function () {
 
     const pages = await factory.getPages();
     const field1 = searchHtmlNode(pages, "name", "input");
-    expect(field1).not.toEqual(null);
+    expect(field1).not.toBeNull();
     expect(field1.attributes.value).toEqual("123");
   });
 
@@ -642,11 +642,11 @@ describe("XFAFactory", function () {
     const pages = await factory.getPages();
     let a = searchHtmlNode(pages, "name", "a");
     expect(a.attributes.href).toEqual("https://github.com/mozilla/pdf.js");
-    expect(a.attributes.newWindow).toEqual(true);
+    expect(a.attributes.newWindow).toBeTrue();
 
     a = searchHtmlNode(pages, "name", "a", false, [1]);
     expect(a.attributes.href).toEqual("https://github.com/allizom/pdf.js");
-    expect(a.attributes.newWindow).toEqual(false);
+    expect(a.attributes.newWindow).toBeFalse();
   });
 
   it("should take the absolute value of the font size", async () => {
