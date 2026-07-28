@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { createIdFactory, XRefMock } from "./test_utils.js";
+import { BoundedXRefMock, createIdFactory, XRefMock } from "./test_utils.js";
 import { Dict, Name, Ref } from "../../src/core/primitives.js";
 import { PDFDocument } from "../../src/core/document.js";
 import { StringStream } from "../../src/core/stream.js";
@@ -322,6 +322,10 @@ describe("document", function () {
           { ref: sigRef, data: sigDict },
           { ref: fieldRef, data: fieldDict },
         ]);
+        acroForm.assignXref(xref);
+        sigDict.assignXref(xref);
+        fieldDict.assignXref(xref);
+
         acroForm.set("Fields", [fieldRef]);
 
         const pdfDocument = getDocument(acroForm, xref);
@@ -362,6 +366,10 @@ describe("document", function () {
           { ref: sigRef, data: sigDict },
           { ref: fieldRef, data: fieldDict },
         ]);
+        acroForm.assignXref(xref);
+        sigDict.assignXref(xref);
+        fieldDict.assignXref(xref);
+
         acroForm.set("Fields", [fieldRef]);
 
         const documentStream = new StringStream(
@@ -386,6 +394,10 @@ describe("document", function () {
           { ref: sigRef, data: sigDict },
           { ref: fieldRef, data: fieldDict },
         ]);
+        acroForm.assignXref(xref);
+        sigDict.assignXref(xref);
+        fieldDict.assignXref(xref);
+
         acroForm.set("Fields", [fieldRef]);
 
         const documentStream = new StringStream(
@@ -418,6 +430,11 @@ describe("document", function () {
           { ref: sigFieldRef, data: sigField },
           { ref: containerRef, data: container },
         ]);
+        acroForm.assignXref(xref);
+        sigDict.assignXref(xref);
+        sigField.assignXref(xref);
+        container.assignXref(xref);
+
         acroForm.set("Fields", [containerRef]);
 
         const pdfDocument = getDocument(acroForm, xref);
@@ -450,6 +467,11 @@ describe("document", function () {
           { ref: sigFieldRef, data: sigField },
           { ref: widgetRef, data: widget },
         ]);
+        acroForm.assignXref(xref);
+        sigDict.assignXref(xref);
+        sigField.assignXref(xref);
+        widget.assignXref(xref);
+
         acroForm.set("Fields", [sigFieldRef]);
 
         const pdfDocument = getDocument(acroForm, xref);
@@ -472,6 +494,10 @@ describe("document", function () {
           { ref: sigRef, data: sigDict },
           { ref: fieldRef, data: fieldDict },
         ]);
+        acroForm.assignXref(xref);
+        sigDict.assignXref(xref);
+        fieldDict.assignXref(xref);
+
         acroForm.set("Fields", [fieldRef]);
 
         const pdfDocument = getDocument(acroForm, xref);
@@ -498,18 +524,21 @@ describe("document", function () {
           name: "Inner",
         });
 
+        const outerField = makeSigField({ T: "outer", sigRef: outerSigRef });
+        const innerField = makeSigField({ T: "inner", sigRef: innerSigRef });
+
         const xref = new XRefMock([
           { ref: outerSigRef, data: outerSig },
-          {
-            ref: outerFieldRef,
-            data: makeSigField({ T: "outer", sigRef: outerSigRef }),
-          },
+          { ref: outerFieldRef, data: outerField },
           { ref: innerSigRef, data: innerSig },
-          {
-            ref: innerFieldRef,
-            data: makeSigField({ T: "inner", sigRef: innerSigRef }),
-          },
+          { ref: innerFieldRef, data: innerField },
         ]);
+        acroForm.assignXref(xref);
+        outerSig.assignXref(xref);
+        innerSig.assignXref(xref);
+        outerField.assignXref(xref);
+        innerField.assignXref(xref);
+
         acroForm.set("Fields", [outerFieldRef, innerFieldRef]);
 
         const pdfDocument = getDocument(acroForm, xref);
@@ -535,14 +564,18 @@ describe("document", function () {
             byteRange: [0, 10, 20, 30],
             subFilter,
           });
+          const sigField = makeSigField({ T: "sig", sigRef });
+
           const xref = new XRefMock([
             { ref: sigRef, data: sigDict },
-            {
-              ref: fieldRef,
-              data: makeSigField({ T: "sig", sigRef }),
-            },
+            { ref: fieldRef, data: sigField },
           ]);
+          acroForm.assignXref(xref);
+          sigDict.assignXref(xref);
+          sigField.assignXref(xref);
+
           acroForm.set("Fields", [fieldRef]);
+
           const pdfDocument = getDocument(acroForm, xref);
           const [sig] = await pdfDocument.signatures;
           return sig.signatureType;
@@ -628,6 +661,41 @@ describe("document", function () {
       expect(fields["parent.kid1.kid11"]).toEqual(["159R"]);
       expect(fields["parent.kid2"]).toEqual(["265R", "266R"]);
       expect(fields.parent).toEqual(["358R"]);
+    });
+
+    it("should get field objects with a circular `Parent` chain", async function () {
+      // A field without a `T` entry inherits its name from the `Parent` chain,
+      // which may be circular in corrupt/malicious documents.
+      const widgetRef = Ref.get(1, 0);
+      const parentRef = Ref.get(2, 0);
+      const grandParentRef = Ref.get(3, 0);
+
+      const widgetDict = new Dict();
+      widgetDict.set("Type", Name.get("Annot"));
+      widgetDict.set("Subtype", Name.get("Widget"));
+      widgetDict.set("FT", Name.get("Btn"));
+      widgetDict.set("Parent", parentRef);
+
+      // Note that the cycle doesn't include the field itself, and that neither
+      // ancestor provides a `T` entry.
+      const parentDict = new Dict();
+      parentDict.set("Parent", grandParentRef);
+      const grandParentDict = new Dict();
+      grandParentDict.set("Parent", parentRef);
+
+      const xref = new BoundedXRefMock([
+        { ref: widgetRef, data: widgetDict },
+        { ref: parentRef, data: parentDict },
+        { ref: grandParentRef, data: grandParentDict },
+      ]);
+
+      const acroForm = new Dict();
+      acroForm.set("Fields", [widgetRef]);
+      const pdfDocument = getDocument(acroForm, xref);
+
+      const { allFields } = await pdfDocument.fieldObjects;
+      expect(Object.keys(allFields)).toEqual([""]);
+      expect(allFields[""].map(obj => obj.id)).toEqual(["1R"]);
     });
 
     it("should check if fields have any actions", async function () {
