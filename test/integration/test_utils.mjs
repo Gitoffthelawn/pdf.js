@@ -600,6 +600,77 @@ async function dragAndDrop(page, selector, translations, steps = 1) {
   await page.waitForSelector("#viewer:not(.noUserSelect)");
 }
 
+// Move two fingers, horizontally centered on (centerX, centerY), from startGap
+// to endGap: it's a pinch out when endGap is larger than startGap.
+// Keep in mind that `TouchManager` starts to pinch only once the distance
+// between the two fingers changed by more than `MIN_TOUCH_DISTANCE_TO_PINCH`
+// (35 CSS pixels), hence the first moves are swallowed and the resulting zoom
+// factor is smaller than endGap / startGap.
+// Explicit start/end points can be used for tests which need an asymmetric
+// gesture, or hooks around each touch lifetime.
+async function pinch(
+  page,
+  {
+    afterEnd = null,
+    afterFirstEnd = null,
+    afterFirstStart = null,
+    afterStart = null,
+    beforeEnd = null,
+    centerX = 0,
+    centerY = 0,
+    centerDeltaX = 0,
+    centerDeltaY = 0,
+    startGap = 0,
+    endGap = startGap,
+    endPoints = null,
+    startPoints = null,
+    steps = 12,
+  }
+) {
+  const normalizePoint = point =>
+    Array.isArray(point) ? { x: point[0], y: point[1] } : point;
+  const start = (
+    startPoints || [
+      { x: centerX - startGap, y: centerY },
+      { x: centerX + startGap, y: centerY },
+    ]
+  ).map(normalizePoint);
+  let end;
+  if (endPoints) {
+    end = endPoints.map(normalizePoint);
+  } else if (startPoints) {
+    end = start;
+  } else {
+    end = [
+      { x: centerX + centerDeltaX - endGap, y: centerY + centerDeltaY },
+      { x: centerX + centerDeltaX + endGap, y: centerY + centerDeltaY },
+    ];
+  }
+
+  const finger0 = await page.touchscreen.touchStart(start[0].x, start[0].y);
+  await afterFirstStart?.(finger0);
+  const finger1 = await page.touchscreen.touchStart(start[1].x, start[1].y);
+  await afterStart?.([finger0, finger1]);
+
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    await finger0.move(
+      start[0].x + (end[0].x - start[0].x) * t,
+      start[0].y + (end[0].y - start[0].y) * t
+    );
+    await finger1.move(
+      start[1].x + (end[1].x - start[1].x) * t,
+      start[1].y + (end[1].y - start[1].y) * t
+    );
+  }
+
+  await beforeEnd?.([finger0, finger1]);
+  await finger0.end();
+  await afterFirstEnd?.([finger0, finger1]);
+  await finger1.end();
+  await afterEnd?.([finger0, finger1]);
+}
+
 function waitForPageChanging(page) {
   return createPromise(page, resolve => {
     window.PDFViewerApplication.eventBus.on("pagechanging", resolve, {
@@ -1163,6 +1234,7 @@ export {
   paste,
   pasteFromClipboard,
   PDI,
+  pinch,
   scrollIntoView,
   selectEditor,
   selectEditors,
