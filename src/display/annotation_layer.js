@@ -75,7 +75,7 @@ const TIMEZONE_OFFSET = new Date().getTimezoneOffset() * 60 * 1000;
  * @property {Object} svgFactory
  * @property {boolean} [enableScripting]
  * @property {boolean} [hasJSActions]
- * @property {Object} [fieldObjects]
+ * @property {Map} [fieldObjects]
  */
 
 class AnnotationElementFactory {
@@ -803,7 +803,7 @@ class AnnotationElement {
     const fields = [];
 
     if (this._fieldObjects) {
-      const fieldObj = this._fieldObjects[name] || [];
+      const fieldObj = this._fieldObjects.get(name) || [];
 
       for (const { page, id, exportValues } of fieldObj) {
         if (page === -1) {
@@ -1217,12 +1217,12 @@ class LinkAnnotationElement extends AnnotationElement {
       if (resetFormFields.length !== 0 || resetFormRefs.length !== 0) {
         const fieldIds = new Set(resetFormRefs);
         for (const fieldName of resetFormFields) {
-          const fields = this._fieldObjects[fieldName] || [];
+          const fields = this._fieldObjects.get(fieldName) || [];
           for (const { id } of fields) {
             fieldIds.add(id);
           }
         }
-        for (const fields of Object.values(this._fieldObjects)) {
+        for (const fields of this._fieldObjects.values()) {
           for (const field of fields) {
             if (fieldIds.has(field.id) === include) {
               allFields.push(field);
@@ -1230,7 +1230,7 @@ class LinkAnnotationElement extends AnnotationElement {
           }
         }
       } else {
-        for (const fields of Object.values(this._fieldObjects)) {
+        for (const fields of this._fieldObjects.values()) {
           allFields.push(...fields);
         }
       }
@@ -1811,11 +1811,21 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
             switch (event.inputType) {
               // https://rawgit.com/w3c/input-events/v1/index.html#interface-InputEvent-Attributes
               case "deleteWordBackward": {
-                const match = value
-                  .substring(0, selectionStart)
-                  .match(/\w*\W*$/);
-                if (match) {
-                  selStart -= match[0].length;
+                // The previous unanchored regex could take quadratic time, so
+                // scan backwards over the trailing non-word characters and
+                // then the word.
+                const wordCharPattern = /\w/;
+                while (
+                  selStart > 0 &&
+                  !wordCharPattern.test(value[selStart - 1])
+                ) {
+                  selStart--;
+                }
+                while (
+                  selStart > 0 &&
+                  wordCharPattern.test(value[selStart - 1])
+                ) {
+                  selStart--;
                 }
                 break;
               }
@@ -3943,7 +3953,7 @@ class MediaAnnotationElement extends AnnotationElement {
  * @property {boolean} [enableScripting] - Enable embedded script execution.
  * @property {boolean} [hasJSActions] - Some fields have JS actions.
  *   The default value is `false`.
- * @property {Object<string, Array<Object>> | null} [fieldObjects]
+ * @property {Map<string, Array<Object>> | null} [fieldObjects]
  * @property {Map<string, HTMLCanvasElement>} [annotationCanvasMap]
  * @property {TextAccessibilityManager} [accessibilityManager]
  * @property {AnnotationEditorUIManager} [annotationEditorUIManager]

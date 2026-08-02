@@ -42,6 +42,7 @@ import {
   isWhiteSpace,
   lookupNormalRect,
   MissingDataException,
+  normalizeCSSFontFamily,
   PDF_VERSION_REGEXP,
   RESOURCES_KEYS_OPERATOR_LIST,
   RESOURCES_KEYS_TEXT_CONTENT,
@@ -1396,9 +1397,7 @@ class PDFDocument {
       if (!(descriptor instanceof Dict)) {
         continue;
       }
-      let fontFamily = descriptor.get("FontFamily");
-      // For example, "Wingdings 3" is not a valid font name in the css specs.
-      fontFamily = fontFamily.replaceAll(/ +(\d)/g, "$1");
+      const fontFamily = normalizeCSSFontFamily(descriptor.get("FontFamily"));
       const fontWeight = descriptor.get("FontWeight");
 
       // Angle is expressed in degrees counterclockwise in PDF
@@ -1962,7 +1961,7 @@ class PDFDocument {
         const { acroForm } = annotationGlobals;
 
         const visitedRefs = new RefSet();
-        const allFields = Object.create(null);
+        const allFields = new Map();
         const fieldPromises = new Map();
         const orphanFields = new RefSetCache();
         for (const fieldRef of acroForm.get("Fields")) {
@@ -1983,7 +1982,7 @@ class PDFDocument {
             Promise.all(promises).then(fields => {
               fields = fields.filter(field => !!field);
               if (fields.length > 0) {
-                allFields[name] = fields;
+                allFields.set(name, fields);
               }
             })
           );
@@ -1991,7 +1990,7 @@ class PDFDocument {
         await Promise.all(allPromises);
 
         return {
-          allFields: Object.keys(allFields).length ? allFields : null,
+          allFields: allFields.size ? allFields : null,
           orphanFields,
         };
       });
@@ -2269,9 +2268,9 @@ class PDFDocument {
       return true;
     }
     if (fieldObjects?.allFields) {
-      return Object.values(fieldObjects.allFields).some(fieldObject =>
-        fieldObject.some(object => object.actions !== null)
-      );
+      return fieldObjects.allFields
+        .values()
+        .some(fieldObj => fieldObj.some(obj => obj.actions !== null));
     }
     return false;
   }
