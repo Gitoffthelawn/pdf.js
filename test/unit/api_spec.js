@@ -7302,9 +7302,14 @@ small scripts as well as for`);
         let loadingTask = getDocument(buildGetDocumentParams("empty.pdf"));
         let pdfDoc = await loadingTask.promise;
 
-        // Simulate what clonePage() puts in annotationStorage when a page is
-        // copied: the original annotation stays on pageIndex 0 and the clone
-        // is placed on pageIndex 1 (the new position of the pasted copy).
+        // Mirror the viewer: copy page 1 and paste the copy right after it.
+        pdfDoc.pagesMapper.copyPages(new Uint32Array([1]));
+        pdfDoc.pagesMapper.pastePages(1);
+        expect(pdfDoc.pagesMapper.pagesNumber).toEqual(2);
+
+        // Model the annotationStorage entries after clonePage(): the original
+        // stays at viewer page index 0 and the copy gets an entry at index 1.
+        // Both viewer pages map to source page 0.
         const inkAnnotation = {
           annotationType: AnnotationEditorType.INK,
           rect: [50, 50, 200, 200],
@@ -7342,15 +7347,15 @@ small scripts as well as for`);
         });
         pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_1", {
           ...inkAnnotation,
+          color: [255, 0, 0],
           pageIndex: 1,
+          isClone: true,
         });
 
-        // Extract page 0 twice: once at output position 0 (original) and once
-        // at output position 1 (clone), mirroring copy+paste in the UI.
-        const data = await pdfDoc.extractPages([
-          { document: null, includePages: [0], pageIndices: [0] },
-          { document: null, includePages: [0], pageIndices: [1] },
-        ]);
+        const { pageInfos, copyLevels } = pdfDoc.pagesMapper.extractPages(
+          new Set([1, 2])
+        );
+        const data = await pdfDoc.extractPages(pageInfos, copyLevels);
         await loadingTask.destroy();
 
         loadingTask = getDocument({ data });
@@ -7358,7 +7363,8 @@ small scripts as well as for`);
 
         expect(pdfDoc.numPages).toEqual(2);
 
-        // Both pages should carry the ink annotation.
+        // Each page must have the expected color and a distinct annotation ID.
+        const annotationIds = [];
         for (let i = 1; i <= 2; i++) {
           const pdfPage = await pdfDoc.getPage(i);
           const annotations = await pdfPage.getAnnotations();
@@ -7366,7 +7372,174 @@ small scripts as well as for`);
           expect(annotations[0].annotationType)
             .withContext(`Page ${i}`)
             .toEqual(AnnotationType.INK);
+          expect(Array.from(annotations[0].color))
+            .withContext(`Page ${i}`)
+            .toEqual(i === 1 ? [0, 0, 255] : [255, 0, 0]);
+          annotationIds.push(annotations[0].id);
         }
+        expect(new Set(annotationIds).size).toEqual(2);
+
+        await loadingTask.destroy();
+      });
+
+      it("keeps distinct annotations when a clone moves before its original", async function () {
+        let loadingTask = getDocument(buildGetDocumentParams("empty.pdf"));
+        let pdfDoc = await loadingTask.promise;
+
+        pdfDoc.pagesMapper.copyPages(new Uint32Array([1]));
+        pdfDoc.pagesMapper.pastePages(1);
+
+        const freeText = {
+          annotationType: AnnotationEditorType.FREETEXT,
+          rect: [12, 34, 56, 78],
+          rotation: 0,
+          fontSize: 10,
+          color: [0, 0, 0],
+        };
+        const original = {
+          ...freeText,
+          value: "on the original",
+          pageIndex: 0,
+        };
+        const clone = {
+          ...freeText,
+          value: "on the clone",
+          pageIndex: 1,
+          isClone: true,
+        };
+        pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_0", original);
+        pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_1", clone);
+
+        // Move the clone before the original and update both editor page
+        // indices to match.
+        pdfDoc.pagesMapper.movePages(new Set([2]), [2], 0);
+        expect(pdfDoc.pagesMapper.getPrevPageNumber(1)).toEqual(2);
+        expect(pdfDoc.pagesMapper.getPrevPageNumber(2)).toEqual(1);
+        clone.pageIndex = 0;
+        original.pageIndex = 1;
+
+        const { pageInfos, copyLevels } =
+          pdfDoc.pagesMapper.getPageMappingForSaving();
+        const data = await pdfDoc.extractPages(pageInfos, copyLevels);
+        await loadingTask.destroy();
+
+        loadingTask = getDocument({ data });
+        pdfDoc = await loadingTask.promise;
+        expect(pdfDoc.numPages).toEqual(2);
+
+        for (let i = 1; i <= 2; i++) {
+          const pdfPage = await pdfDoc.getPage(i);
+          const annotations = await pdfPage.getAnnotations();
+          expect(annotations.map(a => a.contentsObj?.str)).toEqual([
+            i === 1 ? "on the clone" : "on the original",
+          ]);
+        }
+
+        await loadingTask.destroy();
+      });
+
+      it("only keeps the annotations of the extracted copy of a page", async function () {
+        let loadingTask = getDocument(
+          buildGetDocumentParams("three_pages_with_number.pdf")
+        );
+        let pdfDoc = await loadingTask.promise;
+
+        // Copy page 1 and paste it at the end: source page 0 is now at the
+        // viewer positions 1 and 4.
+        pdfDoc.pagesMapper.copyPages(new Uint32Array([1]));
+        pdfDoc.pagesMapper.pastePages(3);
+        expect(pdfDoc.pagesMapper.pagesNumber).toEqual(4);
+
+        const freeText = {
+          annotationType: AnnotationEditorType.FREETEXT,
+          rect: [12, 34, 56, 78],
+          rotation: 0,
+          fontSize: 10,
+          color: [0, 0, 0],
+        };
+        pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_0", {
+          ...freeText,
+          value: "on the original",
+          pageIndex: 0,
+        });
+        pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_1", {
+          ...freeText,
+          value: "on the clone",
+          pageIndex: 3,
+          isClone: true,
+        });
+
+        // Extract the clone only: the annotation of the original must not be
+        // written on it.
+        const { pageInfos, copyLevels } = pdfDoc.pagesMapper.extractPages(
+          new Set([4])
+        );
+        const data = await pdfDoc.extractPages(pageInfos, copyLevels);
+        await loadingTask.destroy();
+
+        loadingTask = getDocument({ data });
+        pdfDoc = await loadingTask.promise;
+        expect(pdfDoc.numPages).toEqual(1);
+
+        const pdfPage = await pdfDoc.getPage(1);
+        const annotations = await pdfPage.getAnnotations();
+        expect(annotations.map(a => a.contentsObj?.str)).toEqual([
+          "on the clone",
+        ]);
+
+        await loadingTask.destroy();
+      });
+
+      it("keeps a shared stamp image when extracting only a copied page", async function () {
+        if (isNodeJS) {
+          pending("Cannot create a bitmap from Node.js.");
+        }
+        const bitmap = await getImageBitmap("firefox_logo.png");
+
+        let loadingTask = getDocument(buildGetDocumentParams("empty.pdf"));
+        let pdfDoc = await loadingTask.promise;
+
+        pdfDoc.pagesMapper.copyPages(new Uint32Array([1]));
+        pdfDoc.pagesMapper.pastePages(1);
+
+        const stamp = {
+          annotationType: AnnotationEditorType.STAMP,
+          rect: [12, 34, 56, 78],
+          rotation: 0,
+          bitmapId: "im1",
+        };
+        // Model stamp serialization: both entries share a bitmapId, but only
+        // one carries the bitmap data.
+        pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_0", {
+          ...stamp,
+          bitmap,
+          pageIndex: 0,
+        });
+        pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_1", {
+          ...stamp,
+          pageIndex: 1,
+          isClone: true,
+          isCopy: true,
+        });
+
+        const { pageInfos, copyLevels } = pdfDoc.pagesMapper.extractPages(
+          new Set([2])
+        );
+        const data = await pdfDoc.extractPages(pageInfos, copyLevels);
+        expect(data).not.toBeNull();
+        await loadingTask.destroy();
+
+        loadingTask = getDocument({ data });
+        pdfDoc = await loadingTask.promise;
+        expect(pdfDoc.numPages).toEqual(1);
+
+        const pdfPage = await pdfDoc.getPage(1);
+        const annotations = await pdfPage.getAnnotations();
+        expect(annotations.length).toEqual(1);
+        expect(annotations[0].annotationType).toEqual(AnnotationType.STAMP);
+
+        const opList = await pdfPage.getOperatorList();
+        expect(opList.fnArray).toContain(OPS.paintImageXObject);
 
         await loadingTask.destroy();
       });
@@ -7771,6 +7944,67 @@ small scripts as well as for`);
         expect([...fieldObjects.keys()]).toEqual(["group"]);
         const annotations = await (await pdfDoc.getPage(1)).getAnnotations();
         expect(annotations[0].fieldName).toEqual("group");
+
+        await loadingTask.destroy();
+      });
+
+      it("rebuilds a missing AcroForm Fields array with a Parent cycle", async function () {
+        const data = assemblePdf([
+          "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm 6 0 R >>\nendobj\n",
+          "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+          "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] " +
+            "/Annots [4 0 R] >>\nendobj\n",
+          "4 0 obj\n<< /Type /Annot /Subtype /Widget /Rect [0 0 20 10] " +
+            "/Parent 5 0 R >>\nendobj\n",
+          // The Parent chain 5 -> 7 -> 5 is cyclic.
+          "5 0 obj\n<< /FT /Tx /T (group) /Kids [4 0 R] /Parent 7 0 R >>\n" +
+            "endobj\n",
+          "6 0 obj\n<< /DA (/Helv 10 Tf) >>\nendobj\n",
+          "7 0 obj\n<< /T (cycle) /Kids [5 0 R] /Parent 5 0 R >>\nendobj\n",
+        ]);
+
+        let loadingTask = getDocument({ data });
+        let pdfDoc = await loadingTask.promise;
+        const extracted = await pdfDoc.extractPages([{ document: null }]);
+        expect(extracted).not.toBeNull();
+        await loadingTask.destroy();
+
+        loadingTask = getDocument({ data: extracted });
+        pdfDoc = await loadingTask.promise;
+
+        const fieldObjects = await pdfDoc.getFieldObjects();
+        expect([...fieldObjects.keys()]).toEqual(["group"]);
+        const annotations = await (await pdfDoc.getPage(1)).getAnnotations();
+        expect(annotations[0].fieldName).toEqual("group");
+
+        await loadingTask.destroy();
+      });
+
+      it("rebuilds a missing AcroForm Fields array with a bogus Parent", async function () {
+        const data = assemblePdf([
+          "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm 6 0 R >>\nendobj\n",
+          "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+          "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] " +
+            "/Annots [4 0 R] >>\nendobj\n",
+          "4 0 obj\n<< /Type /Annot /Subtype /Widget /Rect [0 0 20 10] " +
+            "/FT /Tx /T (widget) /Parent 5 0 R >>\nendobj\n",
+          // The Parent isn't a dictionary.
+          "5 0 obj\n[1 2 3]\nendobj\n",
+          "6 0 obj\n<< /DA (/Helv 10 Tf) >>\nendobj\n",
+        ]);
+
+        let loadingTask = getDocument({ data });
+        let pdfDoc = await loadingTask.promise;
+        const extracted = await pdfDoc.extractPages([{ document: null }]);
+        expect(extracted).not.toBeNull();
+        await loadingTask.destroy();
+
+        loadingTask = getDocument({ data: extracted });
+        pdfDoc = await loadingTask.promise;
+
+        const annotations = await (await pdfDoc.getPage(1)).getAnnotations();
+        expect(annotations.length).toEqual(1);
+        expect(annotations[0].fieldName).toEqual("widget");
 
         await loadingTask.destroy();
       });
