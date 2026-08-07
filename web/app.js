@@ -888,11 +888,13 @@ const PDFViewerApplication = {
       const queryString = document.location.search.substring(1);
       const params = parseQueryString(queryString);
       file = params.get("file") ?? AppOptions.get("defaultUrl");
-      try {
-        file = new URL(file).href;
-      } catch {
-        file = encodeURIComponent(file).replaceAll("%2F", "/");
-      }
+      // Note that `parseQueryString` has already percent-decoded the parameter,
+      // hence it's used as-is below: re-encoding it would break URLs with e.g.
+      // a query string or a percent-encoded path (issue 20137).
+      // In a relative URL a "#" is assumed to be part of the filename, rather
+      // than a fragment separator, since the viewer takes its own hash
+      // parameters from the *viewer* URL (issue 19990).
+      file = URL.parse(file)?.href ?? file.replaceAll("#", "%23");
       validateFileURL(file);
     } else if (PDFJSDev.test("MOZCENTRAL")) {
       file = window.location.href;
@@ -1855,7 +1857,7 @@ const PDFViewerApplication = {
       console.warn("Warning: JavaScript support is not enabled");
 
       // Hack to support auto printing.
-      for (const name in jsActions) {
+      for (const [name, actions] of jsActions) {
         if (triggerAutoPrint) {
           break;
         }
@@ -1867,7 +1869,7 @@ const PDFViewerApplication = {
           case "DidPrint":
             continue;
         }
-        triggerAutoPrint = jsActions[name].some(js => AutoPrintRegExp.test(js));
+        triggerAutoPrint = actions.some(js => AutoPrintRegExp.test(js));
       }
     }
 
