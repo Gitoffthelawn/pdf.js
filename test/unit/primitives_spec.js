@@ -22,8 +22,8 @@ import {
   isRefsEqual,
   Name,
   Ref,
+  RefMap,
   RefSet,
-  RefSetCache,
 } from "../../src/core/primitives.js";
 import { StringStream } from "../../src/core/stream.js";
 import { XRefMock } from "./test_utils.js";
@@ -90,8 +90,8 @@ describe("primitives", function () {
 
   describe("Dict", function () {
     const checkInvalidHasValues = function (dict) {
-      expect(dict.has()).toBeFalsy();
-      expect(dict.has("Prev")).toBeFalsy();
+      expect(dict.has()).toBeFalse();
+      expect(dict.has("Prev")).toBeFalse();
     };
 
     const checkInvalidKeyValues = function (dict) {
@@ -149,7 +149,7 @@ describe("primitives", function () {
     });
 
     it("should return correct value for stored Size key", function () {
-      expect(dictWithSizeKey.has("Size")).toBeTruthy();
+      expect(dictWithSizeKey.has("Size")).toBeTrue();
 
       expect(dictWithSizeKey.get("Size")).toEqual(storedSize);
       expect(dictWithSizeKey.get("Prev", "Size")).toEqual(storedSize);
@@ -167,7 +167,7 @@ describe("primitives", function () {
         dict.set(123, "val");
       }).toThrowError('Dict.set: The "key" must be a string.');
 
-      expect(dict.has(123)).toBeFalsy();
+      expect(dict.has(123)).toBeFalse();
 
       checkInvalidKeyValues(dict);
     });
@@ -178,15 +178,15 @@ describe("primitives", function () {
         dict.set("Size");
       }).toThrowError('Dict.set: The "value" cannot be undefined.');
 
-      expect(dict.has("Size")).toBeFalsy();
+      expect(dict.has("Size")).toBeFalse();
 
       checkInvalidKeyValues(dict);
     });
 
     it("should return correct values for multiple stored keys", function () {
-      expect(dictWithManyKeys.has("FontFile")).toBeTruthy();
-      expect(dictWithManyKeys.has("FontFile2")).toBeTruthy();
-      expect(dictWithManyKeys.has("FontFile3")).toBeTruthy();
+      expect(dictWithManyKeys.has("FontFile")).toBeTrue();
+      expect(dictWithManyKeys.has("FontFile2")).toBeTrue();
+      expect(dictWithManyKeys.has("FontFile3")).toBeTrue();
 
       expect(dictWithManyKeys.get("FontFile3")).toEqual(testFontFile3);
       expect(dictWithManyKeys.get("FontFile2", "FontFile3")).toEqual(
@@ -487,13 +487,13 @@ describe("primitives", function () {
 
     it("should have a stored value", function () {
       refSet.put(ref1);
-      expect(refSet.has(ref1)).toBeTruthy();
+      expect(refSet.has(ref1)).toBeTrue();
     });
 
     it("should not have an unknown value", function () {
-      expect(refSet.has(ref1)).toBeFalsy();
+      expect(refSet.has(ref1)).toBeFalse();
       refSet.put(ref1);
-      expect(refSet.has(ref2)).toBeFalsy();
+      expect(refSet.has(ref2)).toBeFalse();
     });
 
     it("should support iteration", function () {
@@ -501,9 +501,18 @@ describe("primitives", function () {
       refSet.put(ref2);
       expect([...refSet]).toEqual([ref1.toString(), ref2.toString()]);
     });
+
+    it("should support a parent RefSet", function () {
+      const parent = new RefSet();
+      parent.put(ref1);
+      parent.put(ref2);
+
+      const child = new RefSet(parent);
+      expect([...child]).toEqual([ref1.toString(), ref2.toString()]);
+    });
   });
 
-  describe("RefSetCache", function () {
+  describe("RefMap", function () {
     const ref1 = Ref.get(4, 2),
       ref2 = Ref.get(5, 2),
       obj1 = Name.get("foo"),
@@ -511,7 +520,7 @@ describe("primitives", function () {
     let cache;
 
     beforeEach(function () {
-      cache = new RefSetCache();
+      cache = new RefMap();
     });
 
     afterEach(function () {
@@ -520,16 +529,16 @@ describe("primitives", function () {
 
     it("should put, have and get a value", function () {
       cache.put(ref1, obj1);
-      expect(cache.has(ref1)).toBeTruthy();
-      expect(cache.has(ref2)).toBeFalsy();
+      expect(cache.has(ref1)).toBeTrue();
+      expect(cache.has(ref2)).toBeFalse();
       expect(cache.get(ref1)).toBe(obj1);
     });
 
     it("should put, have and get a value by alias", function () {
       cache.put(ref1, obj1);
       cache.putAlias(ref2, ref1);
-      expect(cache.has(ref1)).toBeTruthy();
-      expect(cache.has(ref2)).toBeTruthy();
+      expect(cache.has(ref1)).toBeTrue();
+      expect(cache.has(ref2)).toBeTrue();
       expect(cache.get(ref1)).toBe(obj1);
       expect(cache.get(ref2)).toBe(obj1);
     });

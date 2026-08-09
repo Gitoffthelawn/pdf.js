@@ -2691,19 +2691,15 @@ describe("api", function () {
       const totalPermissionCount = Object.keys(PermissionFlag).length;
       const permissions = await Promise.all([promise0, promise1, promise2]);
 
-      expect(permissions[0].length).toEqual(totalPermissionCount - 1);
-      expect(
-        permissions[0].includes(PermissionFlag.MODIFY_CONTENTS)
-      ).toBeFalsy();
+      expect(permissions[0].size).toEqual(totalPermissionCount - 1);
+      expect(permissions[0].has(PermissionFlag.MODIFY_CONTENTS)).toBeFalse();
 
-      expect(permissions[1].length).toEqual(totalPermissionCount - 2);
-      expect(permissions[1].includes(PermissionFlag.PRINT)).toBeFalsy();
-      expect(
-        permissions[1].includes(PermissionFlag.PRINT_HIGH_QUALITY)
-      ).toBeFalsy();
+      expect(permissions[1].size).toEqual(totalPermissionCount - 2);
+      expect(permissions[1].has(PermissionFlag.PRINT)).toBeFalse();
+      expect(permissions[1].has(PermissionFlag.PRINT_HIGH_QUALITY)).toBeFalse();
 
-      expect(permissions[2].length).toEqual(totalPermissionCount - 1);
-      expect(permissions[2].includes(PermissionFlag.COPY)).toBeFalsy();
+      expect(permissions[2].size).toEqual(totalPermissionCount - 1);
+      expect(permissions[2].has(PermissionFlag.COPY)).toBeFalse();
 
       await Promise.all([
         loadingTask0.destroy(),
@@ -5539,7 +5535,7 @@ have written that much by now. So, here’s to squashing bugs.`);
           }
         }
       }
-      expect(checkedCopyLocalImage).toBeFalsy();
+      expect(checkedCopyLocalImage).toBeUndefined();
 
       firstImgData = null;
       await loadingTask.destroy();
@@ -5592,7 +5588,7 @@ have written that much by now. So, here’s to squashing bugs.`);
           break;
         }
       }
-      expect(checkedCopyLocalImage).toBeTruthy();
+      expect(checkedCopyLocalImage).toBeTrue();
 
       await loadingTask.destroy();
     });
@@ -5652,7 +5648,7 @@ have written that much by now. So, here’s to squashing bugs.`);
           checkedGlobalDecodeFailed = true;
         }
       }
-      expect(checkedGlobalDecodeFailed).toBeTruthy();
+      expect(checkedGlobalDecodeFailed).toBeTrue();
 
       await loadingTask.destroy();
     });
