@@ -19,6 +19,11 @@ function preventDefault(evt) {
   evt.preventDefault();
 }
 
+// Use Gecko's pinch-span epsilon:
+// https://searchfox.org/mozilla-central/source/gfx/layers/apz/src/AsyncPanZoomController.cpp#1775-1788
+// https://searchfox.org/mozilla-central/source/gfx/layers/apz/src/Axis.h#21
+const MIN_TOUCH_SPAN = 1e-4;
+
 class TouchManager {
   #container;
 
@@ -264,11 +269,13 @@ class TouchManager {
     const currGapX = screen1X - screen0X;
     const currGapY = screen1Y - screen0Y;
 
-    const distance = Math.hypot(currGapX, currGapY) || 1;
-    const pDistance = Math.hypot(prevGapX, prevGapY) || 1;
+    const distance = Math.hypot(currGapX, currGapY);
+    const pDistance = Math.hypot(prevGapX, prevGapY);
     if (
-      !this.#isPinching &&
-      Math.abs(pDistance - distance) <= this.MIN_TOUCH_DISTANCE_TO_PINCH
+      distance < MIN_TOUCH_SPAN ||
+      pDistance < MIN_TOUCH_SPAN ||
+      (!this.#isPinching &&
+        Math.abs(pDistance - distance) <= this.MIN_TOUCH_DISTANCE_TO_PINCH)
     ) {
       return;
     }
@@ -305,20 +312,10 @@ class TouchManager {
     }
     // Fewer than two tracked touches remain, so this manager's gesture is over;
     // unrelated entries in the document-wide touch list must not keep it alive.
-    // #touchMoveAC shouldn't be null but it seems that irl it can (see #19793).
-    if (this.#touchMoveAC) {
-      this.#touchMoveAC.abort();
-      this.#touchMoveAC = null;
-      this.#onPinchEnd?.();
-    }
-
-    // The flag is reset here, and only here, hence unconditionally: a pinch
-    // whose pair was broken, e.g. by a third finger or by `isPinchingStopped`,
-    // has no `#touchInfo` anymore but mustn't leak its state into the next
-    // gesture.
+    // Swallow the end only while a two-touch baseline is active.
     const wasTracking = !!this.#touchInfo;
-    this.#touchInfo = null;
-    this.#isPinching = false;
+    this.#endGesture();
+
     if (this.#touchIds.size === 1) {
       // A finger which started on the container is still down, so the gesture
       // is back to its one-finger state: the next finger to land must be
@@ -331,7 +328,20 @@ class TouchManager {
     }
   }
 
+  #endGesture() {
+    // `#setTouchInfo` may already have cleared the baseline.
+    this.#touchInfo = null;
+    this.#isPinching = false;
+    if (this.#touchMoveAC) {
+      this.#touchMoveAC.abort();
+      this.#touchMoveAC = null;
+      this.#onPinchEnd?.();
+    }
+  }
+
   destroy() {
+    this.#endGesture();
+    this.#touchIds.clear();
     this.#touchManagerAC?.abort();
     this.#touchManagerAC = null;
     this.#pointerDownAC?.abort();
