@@ -654,8 +654,8 @@ class AnnotationElement {
       return;
     }
 
-    const [rectBlX, rectBlY, rectTrX, rectTrY] = this.data.rect.map(x =>
-      Math.fround(x)
+    const [rectBlX, rectBlY, rectTrX, rectTrY] = this.data.rect.map(
+      Math.fround
     );
 
     if (quadPoints.length === 8) {
@@ -4212,9 +4212,14 @@ class AnnotationLayer {
     this.div.append(fragment);
     await Promise.all(promises);
     if (this.#accessibilityManager) {
-      for (const element of this.#elements) {
+      const annotationIds = await this.#structTreeLayer?.getAnnotationIds();
+      for (const { contentElement } of this.#elements) {
+        if (annotationIds?.has(contentElement.id)) {
+          // The structure tree already positions this annotation.
+          continue;
+        }
         this.#accessibilityManager.addPointerInTextLayer(
-          element.contentElement,
+          contentElement,
           /* isRemovable = */ false
         );
       }
