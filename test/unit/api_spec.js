@@ -1756,8 +1756,48 @@ describe("api", function () {
     });
 
     it("gets non-default viewer preferences", async function () {
-      const prefs = await pdfDocument.getViewerPreferences();
-      expect(prefs).toEqual(new Map([["Direction", "L2R"]]));
+      const loadingTask0 = getDocument(
+        buildGetDocumentParams("bug1826783.pdf")
+      );
+      const promise0 = loadingTask0.promise.then(pdfDoc =>
+        pdfDoc.getViewerPreferences()
+      );
+
+      const loadingTask1 = getDocument(buildGetDocumentParams("bug951051.pdf"));
+      const promise1 = loadingTask1.promise.then(pdfDoc =>
+        pdfDoc.getViewerPreferences()
+      );
+
+      const viewerPrefs = await Promise.all([promise0, promise1]);
+      expect(viewerPrefs[0]).toEqual(
+        new Map([
+          ["Direction", "L2R"],
+          ["CenterWindow", true],
+          ["DisplayDocTitle", true],
+          ["PrintScaling", "None"],
+          ["Duplex", "Simplex"],
+          ["NumCopies", 1],
+        ])
+      );
+      expect(viewerPrefs[1]).toEqual(
+        new Map([
+          ["CenterWindow", true],
+          ["Direction", "L2R"],
+          ["DisplayDocTitle", false],
+          ["FitWindow", false],
+          ["HideMenubar", false],
+          ["HideToolbar", false],
+          ["HideWindowUI", false],
+          ["NonFullScreenPageMode", "UseNone"],
+          ["PrintArea", "CropBox"],
+          ["PrintClip", "CropBox"],
+          ["PrintScaling", "AppDefault"],
+          ["ViewArea", "CropBox"],
+          ["ViewClip", "CropBox"],
+        ])
+      );
+
+      await Promise.all([loadingTask0.destroy(), loadingTask1.destroy()]);
     });
 
     it("gets default open action", async function () {
@@ -2819,6 +2859,11 @@ describe("api", function () {
       await loadingTask.destroy();
     });
 
+    it("gets non-existent markInfo", async function () {
+      const markInfo = await pdfDocument.getMarkInfo();
+      expect(markInfo).toBeNull();
+    });
+
     it("gets markInfo", async function () {
       const loadingTask = getDocument(
         buildGetDocumentParams("annotation-line.pdf")
@@ -2826,9 +2871,13 @@ describe("api", function () {
       const pdfDoc = await loadingTask.promise;
       const markInfo = await pdfDoc.getMarkInfo();
 
-      expect(markInfo.Marked).toBeTrue();
-      expect(markInfo.UserProperties).toBeFalse();
-      expect(markInfo.Suspects).toBeFalse();
+      expect(markInfo).toEqual(
+        new Map([
+          ["Marked", true],
+          ["UserProperties", false],
+          ["Suspects", false],
+        ])
+      );
 
       await loadingTask.destroy();
     });
