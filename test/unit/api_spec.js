@@ -1109,7 +1109,8 @@ describe("api", function () {
         const docWorker = loadingTask._worker;
         expect(!!docWorker).toBeFalse();
         // checking is the same port is used in the MessageHandler
-        const messageHandlerPort = loadingTask._transport.messageHandler.comObj;
+        const messageHandlerPort =
+          loadingTask._transport.messageHandler._comObj;
         expect(messageHandlerPort === worker.port).toBeTrue();
       });
 
@@ -4286,6 +4287,24 @@ page 1 / 3`);
       expect(text).toEqual(
         "Mitarbeiterinnen und Mitarbeiter arbeiten in über 100 Ländern engagiert im Dienste"
       );
+
+      await loadingTask.destroy();
+    });
+
+    it("gets text content, with ToUnicode entries for unencoded glyphs in a non-embedded Type1 font", async function () {
+      const loadingTask = getDocument(
+        buildGetDocumentParams("nonembedded_type1_tounicode.pdf", {
+          useSystemFonts: true,
+        })
+      );
+      const pdfDoc = await loadingTask.promise;
+      const pdfPage = await pdfDoc.getPage(1);
+      const { items } = await pdfPage.getTextContent({
+        disableNormalization: true,
+      });
+      const text = mergeText(items);
+
+      expect(text).toEqual("óº€íºXABéê");
 
       await loadingTask.destroy();
     });

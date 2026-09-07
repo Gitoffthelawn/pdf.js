@@ -1658,6 +1658,46 @@ describe("annotation", function () {
       expect(data.multiLine).toBeTrue();
     });
 
+    it("should inherit text alignment from acroform", async function () {
+      const annotationGlobals =
+        await AnnotationFactory.createGlobals(pdfManagerMock);
+      annotationGlobals.acroForm = new Dict();
+      annotationGlobals.acroForm.set("Q", 2);
+
+      const textWidgetRef = Ref.get(84, 0);
+      const xref = new XRefMock([{ ref: textWidgetRef, data: textWidgetDict }]);
+
+      const { data } = await AnnotationFactory.create(
+        xref,
+        textWidgetRef,
+        annotationGlobals,
+        idFactoryMock
+      );
+      expect(data.annotationType).toEqual(AnnotationType.WIDGET);
+      expect(data.textAlignment).toEqual(2);
+    });
+
+    it("should not inherit text alignment from acroform if field has its own", async function () {
+      const annotationGlobals =
+        await AnnotationFactory.createGlobals(pdfManagerMock);
+      annotationGlobals.acroForm = new Dict();
+      annotationGlobals.acroForm.set("Q", 2);
+
+      textWidgetDict.set("Q", 0);
+
+      const textWidgetRef = Ref.get(84, 0);
+      const xref = new XRefMock([{ ref: textWidgetRef, data: textWidgetDict }]);
+
+      const { data } = await AnnotationFactory.create(
+        xref,
+        textWidgetRef,
+        annotationGlobals,
+        idFactoryMock
+      );
+      expect(data.annotationType).toEqual(AnnotationType.WIDGET);
+      expect(data.textAlignment).toEqual(0);
+    });
+
     it("should reject comb fields without a maximum length", async function () {
       textWidgetDict.set("Ff", AnnotationFieldFlag.COMB);
 
@@ -1765,6 +1805,37 @@ describe("annotation", function () {
       expect(appearance).toEqual(
         "/Tx BMC q BT /Helv 5 Tf 1 0 0 1 0 0 Tm" +
           " 2 3.72 Td (test\\\\print) Tj ET Q EMC"
+      );
+    });
+
+    it("should render fixed-size text in a narrow field for printing", async function () {
+      textWidgetDict.set("Rect", [0, 0, 4, 10]);
+
+      const textWidgetRef = Ref.get(271, 0);
+      const xref = new XRefMock([
+        { ref: textWidgetRef, data: textWidgetDict },
+        helvRefObj,
+      ]);
+      const task = new WorkerTask("test print");
+      partialEvaluator.xref = xref;
+
+      const annotation = await AnnotationFactory.create(
+        xref,
+        textWidgetRef,
+        annotationGlobalsMock,
+        idFactoryMock
+      );
+      const annotationStorage = new Map();
+      annotationStorage.set(annotation.data.id, { value: "i" });
+
+      const appearance = await annotation._getAppearance(
+        partialEvaluator,
+        task,
+        RenderingIntentFlag.PRINT,
+        annotationStorage
+      );
+      expect(appearance).toEqual(
+        "/Tx BMC q BT /Helv 5 Tf 1 0 0 1 0 0 Tm 2 3.72 Td (i) Tj ET Q EMC"
       );
     });
 
@@ -2094,6 +2165,193 @@ describe("annotation", function () {
       );
 
       expect(appearance).toEqual(expectedAppearance);
+    });
+
+    it("should render multiline auto-sized text in a narrow field for printing", async function () {
+      textWidgetDict.set("Ff", AnnotationFieldFlag.MULTILINE);
+      textWidgetDict.set("DA", "/Helv 0 Tf");
+      textWidgetDict.set("Rect", [0, 0, 5, 20]);
+
+      const textWidgetRef = Ref.get(271, 0);
+      const xref = new XRefMock([
+        { ref: textWidgetRef, data: textWidgetDict },
+        helvRefObj,
+      ]);
+      const task = new WorkerTask("test print");
+      partialEvaluator.xref = xref;
+
+      const annotation = await AnnotationFactory.create(
+        xref,
+        textWidgetRef,
+        annotationGlobalsMock,
+        idFactoryMock
+      );
+      const annotationStorage = new Map();
+      annotationStorage.set(annotation.data.id, { value: "AAAAAAAAAA" });
+
+      const appearance = await annotation._getAppearance(
+        partialEvaluator,
+        task,
+        RenderingIntentFlag.PRINT,
+        annotationStorage
+      );
+      expect(appearance).toEqual(
+        "/Tx BMC q BT /Helv 1.48 Tf 0 g 1 0 0 1 0 20 Tm " +
+          "2 -2.48 Td (A) Tj\n" +
+          "0 -2 Td (A) Tj\n".repeat(8) +
+          "0 -2 Td (A) Tj ET Q EMC"
+      );
+    });
+
+    it("should render long multiline auto-sized text in a narrow field (bug 2069428)", async function () {
+      textWidgetDict.set("Ff", AnnotationFieldFlag.MULTILINE);
+      textWidgetDict.set("DA", "/Helv 0 Tf");
+      textWidgetDict.set("Rect", [0, 0, 5, 75000]);
+
+      const textWidgetRef = Ref.get(271, 0);
+      const xref = new XRefMock([
+        { ref: textWidgetRef, data: textWidgetDict },
+        helvRefObj,
+      ]);
+      const task = new WorkerTask("test print");
+      partialEvaluator.xref = xref;
+
+      const annotation = await AnnotationFactory.create(
+        xref,
+        textWidgetRef,
+        annotationGlobalsMock,
+        idFactoryMock
+      );
+      const annotationStorage = new Map();
+      annotationStorage.set(annotation.data.id, { value: "A".repeat(50000) });
+
+      const appearance = await annotation._getAppearance(
+        partialEvaluator,
+        task,
+        RenderingIntentFlag.PRINT,
+        annotationStorage
+      );
+      const lines = appearance.split("\n");
+      expect(lines.length).toEqual(50000);
+      expect(lines[0]).toEqual(
+        "/Tx BMC q BT /Helv 1.49 Tf 0 g 1 0 0 1 0 75000 Tm 2 -2.5 Td (A) Tj"
+      );
+      expect(lines[1]).toEqual("0 -2.02 Td (A) Tj");
+      expect(lines.at(-1)).toEqual("0 -2.02 Td (A) Tj ET Q EMC");
+    });
+
+    it("should not render text in a field which is too small (bug 2069428)", async function () {
+      textWidgetDict.set("Ff", AnnotationFieldFlag.MULTILINE);
+      textWidgetDict.set("DA", "/Helv 0 Tf");
+
+      for (const rect of [
+        [0, 0, 0, 75000],
+        [0, 0, 4, 100],
+        [0, 0, 200, 1],
+      ]) {
+        textWidgetDict.set("Rect", rect);
+
+        const textWidgetRef = Ref.get(271, 0);
+        const xref = new XRefMock([
+          { ref: textWidgetRef, data: textWidgetDict },
+          helvRefObj,
+        ]);
+        const task = new WorkerTask("test print");
+        partialEvaluator.xref = xref;
+
+        const annotation = await AnnotationFactory.create(
+          xref,
+          textWidgetRef,
+          annotationGlobalsMock,
+          idFactoryMock
+        );
+        const annotationStorage = new Map();
+        annotationStorage.set(annotation.data.id, {
+          value: "A".repeat(50000),
+        });
+
+        const appearance = await annotation._getAppearance(
+          partialEvaluator,
+          task,
+          RenderingIntentFlag.PRINT,
+          annotationStorage
+        );
+        expect(appearance).toEqual("/Tx BMC q Q EMC");
+      }
+    });
+
+    it("should render the background of a small field without a default appearance", async function () {
+      textWidgetDict.delete("DA");
+      textWidgetDict.set("Rect", [0, 0, 4, 10]);
+      const mk = new Dict();
+      mk.set("BG", [1, 0, 0]);
+      textWidgetDict.set("MK", mk);
+
+      const textWidgetRef = Ref.get(271, 0);
+      const xref = new XRefMock([
+        { ref: textWidgetRef, data: textWidgetDict },
+        helvRefObj,
+      ]);
+      const task = new WorkerTask("test print");
+      partialEvaluator.xref = xref;
+
+      const annotation = await AnnotationFactory.create(
+        xref,
+        textWidgetRef,
+        annotationGlobalsMock,
+        idFactoryMock
+      );
+      const annotationStorage = new Map();
+      annotationStorage.set(annotation.data.id, { value: "test" });
+
+      const { opList } = await annotation.getOperatorList(
+        partialEvaluator,
+        task,
+        RenderingIntentFlag.PRINT,
+        annotationStorage
+      );
+      expect(opList.fnArray).toContain(OPS.setFillRGBColor);
+      expect(opList.argsArray).toContain(["#ff0000"]);
+    });
+
+    it("should not use its own canvas when the field has a zero dimension (bug 2069428)", async function () {
+      textWidgetDict.set(
+        "Ff",
+        AnnotationFieldFlag.MULTILINE | AnnotationFieldFlag.READONLY
+      );
+      textWidgetDict.set("DA", "/Helv 0 Tf");
+      textWidgetDict.set("Rect", [0, 0, 0, 75000]);
+
+      const textWidgetRef = Ref.get(271, 0);
+      const xref = new XRefMock([
+        { ref: textWidgetRef, data: textWidgetDict },
+        helvRefObj,
+      ]);
+      const task = new WorkerTask("test display");
+      partialEvaluator.xref = xref;
+
+      const annotation = await AnnotationFactory.create(
+        xref,
+        textWidgetRef,
+        annotationGlobalsMock,
+        idFactoryMock
+      );
+      expect(annotation.data.hasOwnCanvas).toBeTrue();
+
+      const annotationStorage = new Map();
+      annotationStorage.set(annotation.data.id, {
+        value: "A".repeat(50000),
+      });
+
+      const { opList, separateCanvas } = await annotation.getOperatorList(
+        partialEvaluator,
+        task,
+        RenderingIntentFlag.DISPLAY,
+        annotationStorage
+      );
+      expect(opList.length).toEqual(0);
+      expect(separateCanvas).toBeFalse();
+      expect(annotation.data.hasOwnCanvas).toBeFalse();
     });
 
     it("should render comb for printing", async function () {

@@ -22,6 +22,7 @@ import {
   countSerialized,
   countStorageEntries,
   createPromise,
+  decodePNG,
   dragAndDrop,
   firstPageOnTop,
   getAnnotationSelector,
@@ -54,6 +55,7 @@ import {
   unselectEditor,
   waitForAnnotationEditorLayer,
   waitForAnnotationModeChanged,
+  waitForEditorFocusSettled,
   waitForPointerUp,
   waitForSelectedEditor,
   waitForSerialized,
@@ -61,7 +63,6 @@ import {
   waitForTimeout,
   waitForUnselectedEditor,
 } from "./test_utils.mjs";
-import { PNG } from "pngjs";
 
 const selectAll = selectEditors.bind(null, "freeText");
 
@@ -70,6 +71,7 @@ const clearAll = clearEditors.bind(null, "freeText");
 const commit = async page => {
   await page.keyboard.press("Escape");
   await page.waitForSelector(".freeTextEditor.selectedEditor .overlay.enabled");
+  await waitForEditorFocusSettled(page);
 };
 
 const switchToFreeText = switchToEditor.bind(null, "FreeText");
@@ -101,6 +103,7 @@ const createFreeTextEditor = async ({
 
   await page.mouse.click(x, y);
   await page.waitForSelector(editorSelector, { visible: true });
+  await waitForEditorFocusSettled(page);
   if (data) {
     await page.type(`${editorSelector} .internal`, data);
   }
@@ -1582,7 +1585,7 @@ describe("FreeText Editor", () => {
               clip: rect,
               type: "png",
             });
-            const editorImage = PNG.sync.read(Buffer.from(editorPng));
+            const editorImage = await decodePNG(editorPng);
             const editorFirstPix = getFirstPixel(
               editorImage.data,
               editorImage.width,
@@ -1610,7 +1613,7 @@ describe("FreeText Editor", () => {
               clip: rect,
               type: "png",
             });
-            const editorImage = PNG.sync.read(Buffer.from(editorPng));
+            const editorImage = await decodePNG(editorPng);
             const editorFirstPix = getFirstPixel(
               editorImage.data,
               editorImage.width,
@@ -1743,7 +1746,7 @@ describe("FreeText Editor", () => {
               clip: rect,
               type: "png",
             });
-            const editorImage = PNG.sync.read(Buffer.from(editorPng));
+            const editorImage = await decodePNG(editorPng);
             const editorFirstPix = getFirstPixel(
               editorImage.data,
               editorImage.width,
@@ -1777,7 +1780,7 @@ describe("FreeText Editor", () => {
               clip: rect,
               type: "png",
             });
-            const editorImage = PNG.sync.read(Buffer.from(editorPng));
+            const editorImage = await decodePNG(editorPng);
             const editorFirstPix = getFirstPixel(
               editorImage.data,
               editorImage.width,

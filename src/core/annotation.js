@@ -2150,6 +2150,15 @@ class WidgetAnnotation extends Annotation {
       return super.getOperatorList(evaluator, task, intent, annotationStorage);
     }
 
+    const isUsingOwnCanvas = !!(
+      this.data.hasOwnCanvas && intent & RenderingIntentFlag.DISPLAY
+    );
+    if (isUsingOwnCanvas && (this.width === 0 || this.height === 0)) {
+      // Don't request a separate zero-sized canvas (see bug 2069428).
+      this.data.hasOwnCanvas = false;
+      return this._getOperatorListNoAppearance();
+    }
+
     const content = await this._getAppearance(
       evaluator,
       task,
@@ -2167,10 +2176,6 @@ class WidgetAnnotation extends Annotation {
     if (!this._defaultAppearance || content === null) {
       return { opList, separateForm: false, separateCanvas: false };
     }
-
-    const isUsingOwnCanvas = !!(
-      this.data.hasOwnCanvas && intent & RenderingIntentFlag.DISPLAY
-    );
 
     const matrix = [1, 0, 0, 1, 0, 0];
     const bbox = [0, 0, this.width, this.height];
@@ -2470,6 +2475,14 @@ class WidgetAnnotation extends Annotation {
       );
     }
 
+    if (
+      !this.data.defaultAppearanceData.fontSize &&
+      (totalWidth <= 2 * defaultHPadding || totalHeight <= 2 * defaultPadding)
+    ) {
+      // No space remains for auto-sized text after padding (see bug 2069428).
+      return `/Tx BMC q ${colors}Q EMC`;
+    }
+
     let font = await WidgetAnnotation._getFontData(
       evaluator,
       task,
@@ -2688,8 +2701,8 @@ class WidgetAnnotation extends Annotation {
 
   _computeFontSize(height, width, text, font, lineCount) {
     let { fontSize } = this.data.defaultAppearanceData;
-    let lineHeight = (fontSize || 12) * LINE_FACTOR,
-      numberOfLines = Math.round(height / lineHeight);
+    const lineHeight = (fontSize || 12) * LINE_FACTOR;
+    let numberOfLines = Math.round(height / lineHeight);
 
     if (!fontSize) {
       // A zero value for size means that the font shall be auto-sized:
@@ -2745,17 +2758,30 @@ class WidgetAnnotation extends Annotation {
         // Then we'll adjust font size to what we have really.
         numberOfLines = Math.max(numberOfLines, lineCount);
 
-        while (true) {
-          lineHeight = height / numberOfLines;
-          fontSize = roundWithTwoDigits(lineHeight / LINE_FACTOR);
+        const getFontSize = n => roundWithTwoDigits(height / n / LINE_FACTOR);
 
-          if (isTooBig(fontSize)) {
-            numberOfLines++;
-            continue;
+        if (height > 0 && isTooBig(getFontSize(numberOfLines))) {
+          // Smaller font sizes cannot increase the wrapped text height. Find
+          // the first fitting line count with exponential and binary searches,
+          // reducing `isTooBig` calls from linear to logarithmic (bug 2069428).
+          let low = numberOfLines,
+            high = 2 * numberOfLines;
+          while (isTooBig(getFontSize(high))) {
+            low = high;
+            high *= 2;
           }
-
-          break;
+          while (high - low > 1) {
+            const mid = Math.floor((low + high) / 2);
+            if (isTooBig(getFontSize(mid))) {
+              low = mid;
+            } else {
+              high = mid;
+            }
+          }
+          numberOfLines = high;
         }
+
+        fontSize = getFontSize(numberOfLines);
       }
 
       const { fontName, fontColor } = this.data.defaultAppearanceData;
@@ -2856,7 +2882,7 @@ class TextWidgetAnnotation extends WidgetAnnotation {
   constructor(params) {
     super(params);
 
-    const { dict } = params;
+    const { annotationGlobals, dict } = params;
 
     if (dict.has("PMD")) {
       // It's used to display a barcode but it isn't specified so we just hide
@@ -2875,11 +2901,12 @@ class TextWidgetAnnotation extends WidgetAnnotation {
     }
 
     // Determine the alignment of text in the field.
-    let alignment = getInheritableProperty({ dict, key: "Q" });
-    if (!Number.isInteger(alignment) || alignment < 0 || alignment > 2) {
-      alignment = null;
-    }
-    this.data.textAlignment = alignment;
+    const getAlignment = q =>
+      Number.isInteger(q) && q >= 0 && q <= 2 ? q : null;
+    this.data.textAlignment =
+      getAlignment(getInheritableProperty({ dict, key: "Q" })) ??
+      getAlignment(annotationGlobals.acroForm.get("Q")) ??
+      null;
 
     // Determine the maximum length of text in the field.
     let maximumLength = getInheritableProperty({ dict, key: "MaxLen" });
@@ -5506,7 +5533,8 @@ class MediaAnnotation extends Annotation {
       return subtype.name;
     }
 
-    const ext = filename.split(".").at(-1)?.toLowerCase();
+    const extPos = filename.lastIndexOf(".") + 1,
+      ext = extPos > 0 && filename.substring(extPos).toLowerCase();
     switch (ext) {
       case "mp4":
       case "m4v":
