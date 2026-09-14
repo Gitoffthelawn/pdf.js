@@ -44,6 +44,7 @@ import {
   waitForSelectedEditor,
   waitForSerialized,
   waitForStorageEntries,
+  waitForTextToBe,
   waitForTimeout,
 } from "./test_utils.mjs";
 import { AnnotationEditorType } from "../../src/shared/util.js";
@@ -106,17 +107,13 @@ describe("Ink Editor", () => {
           await switchToInk(page);
 
           const rect = await getRect(page, ".annotationEditorLayer");
-
           for (let i = 0; i < 3; i++) {
             const x = rect.x + 100 + i * 100;
             const y = rect.y + 100 + i * 100;
             await drawLine(page, x, y, x + 50, y + 50);
             await commit(page);
           }
-
-          await page.waitForFunction(
-            `document.getElementById("viewer-alert").textContent === "Drawing added"`
-          );
+          await waitForTextToBe(page, "#viewer-alert", "Drawing added");
 
           await clearAll(page);
 
@@ -889,19 +886,11 @@ describe("Ink Editor", () => {
           await page.waitForSelector(`${editorSelector} button.deleteButton`);
           await page.click(`${editorSelector} button.deleteButton`);
           await waitForSerialized(page, 0);
-
-          await page.waitForFunction(() => {
-            const messageElement = document.querySelector(
-              "#editorUndoBarMessage"
-            );
-            return messageElement && messageElement.textContent.trim() !== "";
-          });
-          const message = await page.waitForSelector("#editorUndoBarMessage");
-          const messageText = await page.evaluate(
-            el => el.textContent,
-            message
+          await waitForTextToBe(
+            page,
+            "#editorUndoBarMessage",
+            "Drawing removed"
           );
-          expect(messageText).toContain("Drawing removed");
         })
       );
     });

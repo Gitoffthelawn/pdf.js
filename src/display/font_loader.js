@@ -194,7 +194,7 @@ class FontLoader {
 
     // !this.isFontLoadingAPISupported
     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("WORKER_THREAD")) {
-      throw new Error("Not implemented: sync font loading");
+      throw new Error("Not implemented: DOM font loading");
     }
     const rule = font.createFontFaceRule();
     if (rule) {
@@ -203,27 +203,19 @@ class FontLoader {
       if (this.isSyncFontLoadingSupported) {
         return; // The font was, synchronously, loaded.
       }
-      if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
-        throw new Error("Not implemented: async font loading");
-      }
-      await new Promise(resolve => {
-        const request = this._queueLoadingCallback(resolve);
-        this._prepareFontLoadEvent(font, request);
-      });
+      await this.#testFontLoaded(font);
       // The font was, asynchronously, loaded.
     }
   }
 
   get isFontLoadingAPISupported() {
-    const hasFonts = !!this._document?.fonts;
-    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
-      return shadow(
-        this,
-        "isFontLoadingAPISupported",
-        hasFonts && !this.styleElement
-      );
+    if (
+      (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) &&
+      this.styleElement
+    ) {
+      return shadow(this, "isFontLoadingAPISupported", false);
     }
-    return shadow(this, "isFontLoadingAPISupported", hasFonts);
+    return shadow(this, "isFontLoadingAPISupported", !!this._document?.fonts);
   }
 
   get isSyncFontLoadingSupported() {
@@ -241,12 +233,12 @@ class FontLoader {
     );
   }
 
-  _queueLoadingCallback(callback) {
+  #testFontLoaded(font) {
     if (
       typeof PDFJSDev !== "undefined" &&
       PDFJSDev.test("MOZCENTRAL || WORKER_THREAD")
     ) {
-      throw new Error("Not implemented: _queueLoadingCallback");
+      throw new Error("Not implemented: #testFontLoaded");
     }
 
     function completeRequest() {
@@ -256,31 +248,21 @@ class FontLoader {
       // Sending all completed requests in order of how they were queued.
       while (loadingRequests.length > 0 && loadingRequests[0].done) {
         const otherRequest = loadingRequests.shift();
-        setTimeout(otherRequest.callback, 0);
+        setTimeout(otherRequest.resolve, 0);
       }
     }
 
     const { loadingRequests } = this;
+    const { promise, resolve } = Promise.withResolvers();
     const request = {
       done: false,
-      complete: completeRequest,
-      callback,
+      resolve,
     };
     loadingRequests.push(request);
-    return request;
-  }
-
-  get _loadTestFont() {
-    if (
-      typeof PDFJSDev !== "undefined" &&
-      PDFJSDev.test("MOZCENTRAL || WORKER_THREAD")
-    ) {
-      throw new Error("Not implemented: _loadTestFont");
-    }
 
     // This is a CFF font with 1 glyph for '.' that fills its entire width
     // and height.
-    const testFont = atob(
+    this._loadTestFont ??= atob(
       "T1RUTwALAIAAAwAwQ0ZGIDHtZg4AAAOYAAAAgUZGVE1lkzZwAAAEHAAAABxHREVGABQA" +
         "FQAABDgAAAAeT1MvMlYNYwkAAAEgAAAAYGNtYXABDQLUAAACNAAAAUJoZWFk/xVFDQAA" +
         "ALwAAAA2aGhlYQdkA+oAAAD0AAAAJGhtdHgD6AAAAAAEWAAAAAZtYXhwAAJQAAAAARgA" +
@@ -304,16 +286,6 @@ class FontLoader {
         "Dov6fAH6fAT+fPp8+nwHDosMCvm1Cvm1DAz6fBQAAAAAAAABAAAAAMmJbzEAAAAAzgTj" +
         "FQAAAADOBOQpAAEAAAAAAAAADAAUAAQAAAABAAAAAgABAAAAAAAAAAAD6AAAAAAAAA=="
     );
-    return shadow(this, "_loadTestFont", testFont);
-  }
-
-  _prepareFontLoadEvent(font, request) {
-    if (
-      typeof PDFJSDev !== "undefined" &&
-      PDFJSDev.test("MOZCENTRAL || WORKER_THREAD")
-    ) {
-      throw new Error("Not implemented: _prepareFontLoadEvent");
-    }
 
     /** Hack begin */
     // There's currently no event when a font has finished downloading so the
@@ -415,14 +387,16 @@ class FontLoader {
 
     isFontReady(loadTestFontId, () => {
       div.remove();
-      request.complete();
+      completeRequest();
     });
     /** Hack end */
+
+    return promise;
   }
 }
 
 class FontFaceObject {
-  compiledGlyphs = Object.create(null);
+  #compiledPaths = new Map();
 
   #fontData;
 
@@ -502,24 +476,26 @@ class FontFaceObject {
   }
 
   getPathGenerator(objs, character) {
-    if (this.compiledGlyphs[character] !== undefined) {
-      return this.compiledGlyphs[character];
+    let path = this.#compiledPaths.get(character);
+    if (path) {
+      return path;
     }
 
-    const objId = this.loadedName + "_path_" + character;
+    const objId = `${this.loadedName}_path_${character}`;
     let cmds;
     try {
       cmds = objs.get(objId);
     } catch (ex) {
       warn(`getPathGenerator - ignoring character: "${ex}".`);
     }
-    const path = makePathFromDrawOPS(cmds?.path);
+    path = makePathFromDrawOPS(cmds?.path);
 
     if (!this.fontExtraProperties) {
-      // Remove the raw path-string, since we don't need it anymore.
+      // Remove the raw path-data, since we don't need it anymore.
       objs.delete(objId);
     }
-    return (this.compiledGlyphs[character] = path);
+    this.#compiledPaths.set(character, path);
+    return path;
   }
 
   get black() {

@@ -59,6 +59,7 @@ import {
   waitForSelectedEditor,
   waitForSerialized,
   waitForStorageEntries,
+  waitForTextToBe,
   waitForTimeout,
   waitForUnselectedEditor,
 } from "./test_utils.mjs";
@@ -141,10 +142,7 @@ describe("FreeText Editor", () => {
             y: rect.y + 100,
             data,
           });
-
-          await page.waitForFunction(
-            `document.getElementById("viewer-alert").textContent === "Text added"`
-          );
+          await waitForTextToBe(page, "#viewer-alert", "Text added");
 
           let content = await page.$eval(editorSelector, el =>
             el.innerText.trimEnd()
@@ -3470,19 +3468,7 @@ describe("FreeText Editor", () => {
           await page.waitForSelector(`${editorSelector} button.deleteButton`);
           await page.click(`${editorSelector} button.deleteButton`);
           await waitForSerialized(page, 0);
-
-          await page.waitForFunction(() => {
-            const messageElement = document.querySelector(
-              "#editorUndoBarMessage"
-            );
-            return messageElement && messageElement.textContent.trim() !== "";
-          });
-          const message = await page.waitForSelector("#editorUndoBarMessage");
-          const messageText = await page.evaluate(
-            el => el.textContent,
-            message
-          );
-          expect(messageText).toContain("Text removed");
+          await waitForTextToBe(page, "#editorUndoBarMessage", "Text removed");
         })
       );
     });

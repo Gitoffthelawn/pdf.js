@@ -49,6 +49,7 @@ import {
   waitForPageRendered,
   waitForSelectedEditor,
   waitForSerialized,
+  waitForTextToBe,
   waitForTimeout,
 } from "./test_utils.mjs";
 import fs from "fs";
@@ -117,15 +118,11 @@ describe("Stamp Editor", () => {
           );
           const editorSelector = getEditorSelector(0);
           await waitForImage(page, editorSelector);
-
-          await page.waitForFunction(
-            `document.getElementById("viewer-alert").textContent === "Image added"`
-          );
-
-          const { width } = await getEditorDimensions(page, editorSelector);
+          await waitForTextToBe(page, "#viewer-alert", "Image added");
 
           // The image is bigger than the page, so it has been scaled down to
           // 75% of the page width.
+          const { width } = await getEditorDimensions(page, editorSelector);
           expect(width).toEqual("75%");
 
           const [bitmap] = await serializeBitmapDimensions(page);
@@ -1110,12 +1107,7 @@ describe("Stamp Editor", () => {
         // Wait for the tooltip to be visible.
         const tooltipSelector = `${buttonSelector} .tooltip`;
         await page.waitForSelector(tooltipSelector, { visible: true });
-
-        const tooltipText = await page.evaluate(
-          sel => document.querySelector(`${sel}`).textContent,
-          tooltipSelector
-        );
-        expect(tooltipText).toEqual("Hello World");
+        await waitForTextToBe(page, tooltipSelector, "Hello World");
 
         // Click on the Review button.
         await page.click(buttonSelector);
@@ -1644,16 +1636,7 @@ describe("Stamp Editor", () => {
         await page.waitForSelector(`${editorSelector} button.deleteButton`);
         await page.click(`${editorSelector} button.deleteButton`);
         await waitForSerialized(page, 0);
-
-        await page.waitForFunction(() => {
-          const messageElement = document.querySelector(
-            "#editorUndoBarMessage"
-          );
-          return messageElement && messageElement.textContent.trim() !== "";
-        });
-        const message = await page.waitForSelector("#editorUndoBarMessage");
-        const messageText = await page.evaluate(el => el.textContent, message);
-        expect(messageText).toContain("Image removed");
+        await waitForTextToBe(page, "#editorUndoBarMessage", "Image removed");
       }
     });
 
