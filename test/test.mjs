@@ -97,6 +97,7 @@ function parseOptions() {
       jobs: { type: "string", short: "j", default: "1" },
       manifestFile: { type: "string", default: "test_manifest.json" },
       masterMode: { type: "boolean", short: "m", default: false },
+      noBrowserDownload: { type: "boolean", default: false },
       noChrome: { type: "boolean", default: false },
       noDownload: { type: "boolean", default: false },
       noFirefox: { type: "boolean", default: false },
@@ -128,6 +129,7 @@ function parseOptions() {
         "  --jobs, -j          Number of parallel tabs per browser. [1]\n" +
         "  --manifestFile      Path to manifest JSON file. [test_manifest.json]\n" +
         "  --masterMode, -m    Run the script in master mode.\n" +
+        "  --noBrowserDownload Use already installed browsers.\n" +
         "  --noChrome          Skip Chrome when running tests.\n" +
         "  --noDownload        Skip downloading of test PDFs.\n" +
         "  --noFirefox         Skip Firefox when running tests.\n" +
@@ -1088,13 +1090,11 @@ async function startBrowser({
       // Disable WebGPU (prevents log spam on Windows, and environments like
       // GitHub Actions don't expose GPUs anyway).
       "dom.webgpu.enabled": false,
-      // Pin the ClearType parameters to the values a content process starts
-      // with: with the defaults, Firefox derives them from the system settings
-      // and pushes them to the content processes later, so system fonts
-      // rendered before and after that update differ (the reference images of
-      // PDFs with non-embedded fonts weren't reproducible on Windows).
-      "gfx.font_rendering.cleartype_params.rendering_mode": 0,
-      "gfx.font_rendering.cleartype_params.cleartype_level": 100,
+      // Override system rendering parameters when Windows ClearType is enabled.
+      // Level 0 selects grayscale instead of subpixel antialiasing; mode 5
+      // selects natural symmetric rendering (antialiasing in both directions).
+      "gfx.font_rendering.cleartype_params.rendering_mode": 5,
+      "gfx.font_rendering.cleartype_params.cleartype_level": 0,
       "gfx.font_rendering.cleartype_params.enhanced_contrast": 100,
       "gfx.font_rendering.cleartype_params.gamma": 2200,
       "gfx.font_rendering.cleartype_params.pixel_structure": 1,
@@ -1133,15 +1133,6 @@ async function startBrowser({
 }
 
 async function startBrowsers({ baseUrl, initializeSession, numSessions = 1 }) {
-  // Install the browsers.
-  for (const browser of ["firefox@nightly", "chrome@stable"]) {
-    execSync(`npx puppeteer browsers install ${browser}`, { stdio: "inherit" });
-  }
-
-  // Remove old browser revisions from Puppeteer's cache. The commands above can
-  // download new browser revisions, so this prevents the disk from filling up.
-  await puppeteer.trimCache();
-
   const browserNames = ["firefox", "chrome"];
   if (options.noChrome) {
     browserNames.splice(1, 1);
@@ -1149,6 +1140,19 @@ async function startBrowsers({ baseUrl, initializeSession, numSessions = 1 }) {
   if (options.noFirefox) {
     browserNames.splice(0, 1);
   }
+
+  if (!options.noBrowserDownload) {
+    for (const browserName of browserNames) {
+      const version = browserName === "firefox" ? "nightly" : "stable";
+      execSync(`npx puppeteer browsers install ${browserName}@${version}`, {
+        stdio: "inherit",
+      });
+    }
+
+    // Remove old browser revisions after installing new ones.
+    await puppeteer.trimCache();
+  }
+
   for (const browserName of browserNames) {
     for (let i = 0; i < numSessions; i++) {
       // When running multiple sessions per browser, append an index suffix to
