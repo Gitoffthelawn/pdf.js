@@ -18,6 +18,12 @@
  */
 
 import {
+  browserCloseTimeout,
+  browserTimeout,
+  killBrowser,
+  startBrowser,
+} from "../test.mjs";
+import {
   closePages,
   closeSinglePage,
   firstPageOnTop,
@@ -28,7 +34,6 @@ import {
   waitForEvent,
 } from "./test_utils.mjs";
 import { MathClamp } from "../../src/shared/math_clamp.js";
-import { startBrowser } from "../test.mjs";
 
 /**
  * @typedef Point
@@ -58,9 +63,13 @@ const describeFirefoxOnly = global.integrationSessions.some(
   ? describe
   : xdescribe;
 
-// Dedicated browser setup can exceed Jasmine's 30-second default. Keep this
-// above `startBrowser`'s protocol timeout so protocol errors surface first.
-const BROWSER_HOOK_TIMEOUT = 60000;
+// Allow one protocol timeout, the close fallback, and a 10-second margin.
+const DEDICATED_BROWSER_TIMEOUT =
+  (browserTimeout + browserCloseTimeout + 10) * 1000;
+
+function dedicatedBrowserTest(description, test) {
+  it(description, test, DEDICATED_BROWSER_TIMEOUT);
+}
 
 /**
  * @param {Browser} [browser]
@@ -72,7 +81,7 @@ async function closeDedicatedBrowser(browser, page) {
       await closeSinglePage(page);
     }
   } finally {
-    await browser?.close();
+    await killBrowser(browser);
   }
 }
 
@@ -305,43 +314,41 @@ describe("Text layer", () => {
       jasmine.addAsyncMatchers({
         // Check that a page has a selection containing the given text, with
         // some tolerance for extra characters before/after.
-        toHaveRoughlySelected({ pp }) {
-          return {
-            async compare(page, expected) {
-              const TOLERANCE = 10;
-              const actual = await getSelectionText(page);
+        toHaveRoughlySelected: ({ pp }) => ({
+          async compare(page, expected) {
+            const TOLERANCE = 10;
+            const actual = await getSelectionText(page);
 
-              let start, end;
-              if (expected instanceof RegExp) {
-                const match = expected.exec(actual);
-                start = -1;
-                if (match) {
-                  start = match.index;
-                  end = start + match[0].length;
-                }
-              } else {
-                start = actual.indexOf(expected);
-                if (start !== -1) {
-                  end = start + expected.length;
-                }
+            let start, end;
+            if (expected instanceof RegExp) {
+              const match = expected.exec(actual);
+              start = -1;
+              if (match) {
+                start = match.index;
+                end = start + match[0].length;
               }
+            } else {
+              start = actual.indexOf(expected);
+              if (start !== -1) {
+                end = start + expected.length;
+              }
+            }
 
-              const pass =
-                start !== -1 &&
-                start < TOLERANCE &&
-                end > actual.length - TOLERANCE;
+            const pass =
+              start !== -1 &&
+              start < TOLERANCE &&
+              end > actual.length - TOLERANCE;
 
-              return {
-                pass,
-                message: `Expected ${pp(
-                  actual.length > 200
-                    ? actual.slice(0, 100) + "[...]" + actual.slice(-100)
-                    : actual
-                )} to ${pass ? "not " : ""}roughly match ${pp(expected)}.`,
-              };
-            },
-          };
-        },
+            return {
+              pass,
+              message: `Expected ${pp(
+                actual.length > 200
+                  ? actual.slice(0, 100) + "[...]" + actual.slice(-100)
+                  : actual
+              )} to ${pass ? "not " : ""}roughly match ${pp(expected)}.`,
+            };
+          },
+        }),
       });
     });
 
@@ -1287,13 +1294,13 @@ describe("Text layer", () => {
           `.page[data-page-number = "1"] .endOfContent`,
           { timeout: 0 }
         );
-      }, BROWSER_HOOK_TIMEOUT);
+      }, DEDICATED_BROWSER_TIMEOUT);
 
       afterEach(async () => {
         await closeDedicatedBrowser(browser, page);
-      }, BROWSER_HOOK_TIMEOUT);
+      }, DEDICATED_BROWSER_TIMEOUT);
 
-      it("doesn't jump when moving selection", async () => {
+      dedicatedBrowserTest("doesn't jump when moving selection", async () => {
         const [initialStart, initialEnd, finalEnd] = await Promise.all([
           getSpanRectFromText(
             page,
@@ -1510,13 +1517,13 @@ describe("Text layer", () => {
         `.page[data-page-number = "1"] .endOfContent`,
         { timeout: 0 }
       );
-    }, BROWSER_HOOK_TIMEOUT);
+    }, DEDICATED_BROWSER_TIMEOUT);
 
     afterEach(async () => {
       await closeDedicatedBrowser(browser, page);
-    }, BROWSER_HOOK_TIMEOUT);
+    }, DEDICATED_BROWSER_TIMEOUT);
 
-    it("renders spans with the right size", async () => {
+    dedicatedBrowserTest("renders spans with the right size", async () => {
       const rect = await getSpanRectFromText(
         page,
         1,
