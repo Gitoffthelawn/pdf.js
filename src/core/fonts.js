@@ -1321,25 +1321,22 @@ class Font {
             map.set(charCode, cidToGidMap.get(cid));
           }
         }
-        // When the /CIDToGIDMap is "incomplete", fallback to an included
-        // identity /ToUnicode-map (fixes issue11915.pdf).
+        // Fall back to the included identity /ToUnicode-map for an incomplete
+        // /CIDToGIDMap (issue11915.pdf).
         //
-        // The `_charToGlyph` method will fallback to an identity `fontCharCode`
-        // mapping, and this is a non-embedded font (i.e. the `isInFont` value
-        // won't affect glyph-rendering), hence it's more efficient to simply
-        // remove any entries not found in the /CIDToGIDMap rather than creating
-        // a large and *almost* identity `toFontChar` mapping here.
+        // Removing an entry makes `_charToGlyph` fall back to its char code.
+        // For non-embedded fonts, `isInFont` does not prevent rendering.
+        // Iterate `map` since deleting entries it doesn't contain is a no-op.
         if (
           cidToGidMap.size !== this.toUnicode.size &&
           properties.hasIncludedToUnicodeMap &&
           this.toUnicode instanceof IdentityToUnicodeMap
         ) {
-          this.toUnicode.forEach((charCode, unicodeCharCode) => {
-            const cid = map.get(charCode);
-            if (!cidToGidMap.has(cid)) {
+          for (const [charCode, cid] of map) {
+            if (!cidToGidMap.has(cid) && this.toUnicode.has(charCode)) {
               map.delete(charCode);
             }
-          });
+          }
         }
       }
 
@@ -2261,7 +2258,8 @@ class Font {
         locaEntries,
         numGlyphs
       );
-      const missingGlyphs = new Set();
+      // Glyph IDs are in [0, numGlyphs), so use one byte per glyph.
+      const missingGlyphs = new Uint8Array(numGlyphs);
       let writeOffset = 0;
       itemEncode(locaData, 0, writeOffset);
       for (i = 0, j = itemSize; i < numGlyphs; i++, j += itemSize) {
@@ -2277,7 +2275,7 @@ class Font {
             );
         const newLength = glyphProfile.length;
         if (newLength === 0) {
-          missingGlyphs.add(i);
+          missingGlyphs[i] = 1;
         }
         if (glyphProfile.sizeOfInstructions > maxSizeOfInstructions) {
           maxSizeOfInstructions = glyphProfile.sizeOfInstructions;
@@ -2957,7 +2955,7 @@ class Font {
 
     sanitizeHead(tables.head, numGlyphs, isTrueType ? tables.loca.length : 0);
 
-    let missingGlyphs = new Set();
+    let missingGlyphs = null;
     if (isTrueType) {
       const glyphsInfo = sanitizeGlyphLocations(
         tables.loca,
@@ -3026,7 +3024,7 @@ class Font {
 
     // Helper function to try to skip mapping of empty glyphs.
     function hasGlyph(glyphId) {
-      return !missingGlyphs.has(glyphId);
+      return !missingGlyphs?.[glyphId];
     }
 
     if (properties.composite) {
