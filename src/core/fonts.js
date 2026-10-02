@@ -87,7 +87,6 @@ const EXPORT_DATA_PROPERTIES = [
   // "charProcOperatorList" is handled separately, since it's not compiled.
   "cssFontInfo",
   "data",
-  "defaultVMetrics",
   "descent",
   "disableFontFace",
   "fallbackName",
@@ -108,6 +107,7 @@ const EXPORT_DATA_PROPERTIES = [
 const EXPORT_DATA_EXTRA_PROPERTIES = [
   "composite",
   "defaultEncoding",
+  "defaultVMetrics",
   "defaultWidth",
   "differences",
   "isMonospace",
@@ -3561,7 +3561,12 @@ class Font {
     if (typeof width !== "number") {
       width = this.defaultWidth;
     }
-    const vmetric = this.vmetrics?.[widthCode] || this.defaultVMetrics;
+    let vmetric = this.vmetrics?.[widthCode];
+    if (!vmetric && this.defaultVMetrics) {
+      // Without a W2 entry, vx is half the glyph width (PDF 32000-1, 9.7.4.3).
+      const [w1y, , vy] = this.defaultVMetrics;
+      vmetric = [w1y, width * 0.5, vy];
+    }
 
     let unicode = this.toUnicode.get(charcode) || charcode;
     if (typeof unicode === "number") {
