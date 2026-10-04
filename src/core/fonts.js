@@ -80,14 +80,12 @@ const PRIVATE_USE_AREAS = [
 const PDF_GLYPH_SPACE_UNITS = 1000;
 
 const EXPORT_DATA_PROPERTIES = [
-  "ascent",
   "bbox",
   "black",
   "bold",
   // "charProcOperatorList" is handled separately, since it's not compiled.
   "cssFontInfo",
   "data",
-  "descent",
   "disableFontFace",
   "fallbackName",
   "fontExtraProperties",
@@ -97,21 +95,23 @@ const EXPORT_DATA_PROPERTIES = [
   "italic",
   "loadedName",
   "missingFile",
-  "name",
   "remeasure",
   "systemFontInfo",
   "vertical",
 ];
 
 const EXPORT_DATA_EXTRA_PROPERTIES = [
+  "ascent",
   "composite",
   "defaultEncoding",
   "defaultVMetrics",
   "defaultWidth",
+  "descent",
   "differences",
   "isMonospace",
   "isSerifFont",
   "isSymbolicFont",
+  "name",
   "seacMap",
   "subtype",
   "toFontChar",

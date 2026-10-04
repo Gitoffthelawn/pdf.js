@@ -110,12 +110,9 @@ class FontInfo {
 
   #view;
 
-  constructor({ buffer, extra }) {
+  constructor(buffer) {
     this.#buffer = buffer;
     this.#view = new DataView(buffer);
-    if (extra) {
-      Object.assign(this, extra);
-    }
   }
 
   #readBoolean(index) {
@@ -164,19 +161,6 @@ class FontInfo {
 
   get vertical() {
     return shadow(this, "vertical", this.#readBoolean(9));
-  }
-
-  #readNumber(index) {
-    assert(index < FONT_INFO.numbers.length, "Invalid number index");
-    return this.#view.getFloat64(FONT_INFO.OFFSET_NUMBERS + index * 8);
-  }
-
-  get ascent() {
-    return shadow(this, "ascent", this.#readNumber(0));
-  }
-
-  get descent() {
-    return shadow(this, "descent", this.#readNumber(1));
   }
 
   #readArray(offset, arrLen, lookupName, increment) {
@@ -235,10 +219,6 @@ class FontInfo {
 
   get loadedName() {
     return shadow(this, "loadedName", this.#readString(1));
-  }
-
-  get name() {
-    return shadow(this, "name", this.#readString(2));
   }
 
   #getBufferOffset(index) {

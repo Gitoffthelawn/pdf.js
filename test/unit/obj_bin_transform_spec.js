@@ -64,13 +64,10 @@ describe("obj_bin_transform", function () {
       missingFile: true,
       remeasure: true,
       vertical: true,
-      ascent: 1,
-      descent: -1,
       bbox: [1, 1, 1, 1],
       fontMatrix: [1, 1, 1, 1, 1, 1],
       fallbackName: "string",
       loadedName: "string",
-      name: "string",
       data: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
       uselessProp: "something",
     };
@@ -123,14 +120,14 @@ describe("obj_bin_transform", function () {
 
       describe("FontInfo", function () {
         it("must roundtrip correctly for FontInfo", function () {
-          let sizeEstimate = 67; // fixed offset until the strings
+          let sizeEstimate = 41; // fixed offset until the strings
           const { encoder } = InfoUtils;
           sizeEstimate += 4 + 4 * (4 + encoder.encode("string").length);
           sizeEstimate += 4 + 4; // cssFontInfo and systemFontInfo
           sizeEstimate += 4 + fontInfo.data.length;
           const buffer = compileFontInfo(fontInfo);
           expect(buffer.byteLength).toEqual(sizeEstimate);
-          const deserialized = new FontInfo({ buffer });
+          const deserialized = new FontInfo(buffer);
           expect(deserialized.black).toBeTrue();
           expect(deserialized.bold).toBeTrue();
           expect(deserialized.disableFontFace).toBeTrue();
@@ -141,13 +138,10 @@ describe("obj_bin_transform", function () {
           expect(deserialized.missingFile).toBeTrue();
           expect(deserialized.remeasure).toBeTrue();
           expect(deserialized.vertical).toBeTrue();
-          expect(deserialized.ascent).toEqual(1);
-          expect(deserialized.descent).toEqual(-1);
           expect(deserialized.bbox).toEqual([1, 1, 1, 1]);
           expect(deserialized.fontMatrix).toEqual([1, 1, 1, 1, 1, 1]);
           expect(deserialized.fallbackName).toEqual("string");
           expect(deserialized.loadedName).toEqual("string");
-          expect(deserialized.name).toEqual("string");
           expect(Array.from(deserialized.data)).toEqual([
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
           ]);
@@ -162,7 +156,7 @@ describe("obj_bin_transform", function () {
             cssFontInfo,
             systemFontInfo,
           });
-          const deserialized = new FontInfo({ buffer });
+          const deserialized = new FontInfo(buffer);
           expect(deserialized.cssFontInfo.fontWeight).toEqual("not a number");
           expect(deserialized.systemFontInfo.src).toEqual("source");
         });

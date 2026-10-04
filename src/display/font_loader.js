@@ -544,14 +544,6 @@ class FontFaceObject {
     return this.#fontData.vertical;
   }
 
-  get ascent() {
-    return this.#fontData.ascent;
-  }
-
-  get descent() {
-    return this.#fontData.descent;
-  }
-
   get bbox() {
     return this.#fontData.bbox;
   }
@@ -570,10 +562,6 @@ class FontFaceObject {
 
   get mimetype() {
     return this.missingFile ? null : "font/opentype";
-  }
-
-  get name() {
-    return this.#fontData.name;
   }
 
   get data() {

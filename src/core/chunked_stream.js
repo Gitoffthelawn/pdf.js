@@ -82,8 +82,6 @@ class ChunkedStream extends Stream {
     const endChunk = Math.floor((end - 1) / chunkSize) + 1;
 
     for (let curChunk = beginChunk; curChunk < endChunk; ++curChunk) {
-      // Since a value can only occur *once* in a `Set`, there's no need to
-      // manually check `Set.prototype.has()` before adding the value here.
       this._loadedChunks.add(curChunk);
     }
   }
@@ -107,8 +105,6 @@ class ChunkedStream extends Stream {
         : Math.floor(position / this.chunkSize);
 
     for (let curChunk = beginChunk; curChunk < endChunk; ++curChunk) {
-      // Since a value can only occur *once* in a `Set`, there's no need to
-      // manually check `Set.prototype.has()` before adding the value here.
       this._loadedChunks.add(curChunk);
     }
   }
@@ -259,9 +255,9 @@ class ChunkedStream extends Stream {
 class ChunkedStreamManager {
   #aborted = false;
 
-  currRequestId = 0;
+  #requestId = 0;
 
-  _chunksNeededByRequest = new Map();
+  #chunksNeededByRequest = new Map();
 
   #loadedStreamCapability = Promise.withResolvers();
 
@@ -324,10 +320,7 @@ class ChunkedStreamManager {
   }
 
   _requestChunks(chunks) {
-    const requestId = this.currRequestId++;
-
     const chunksNeeded = new Set();
-    this._chunksNeededByRequest.set(requestId, chunksNeeded);
     for (const chunk of chunks) {
       if (!this.stream.hasChunk(chunk)) {
         chunksNeeded.add(chunk);
@@ -337,6 +330,8 @@ class ChunkedStreamManager {
     if (chunksNeeded.size === 0) {
       return Promise.resolve();
     }
+    const requestId = this.#requestId++;
+    this.#chunksNeededByRequest.set(requestId, chunksNeeded);
 
     const capability = Promise.withResolvers();
     this._promisesByRequest.set(requestId, capability);
@@ -469,10 +464,8 @@ class ChunkedStreamManager {
       this._requestsByChunk.delete(curChunk);
 
       for (const requestId of requestIds) {
-        const chunksNeeded = this._chunksNeededByRequest.get(requestId);
-        if (chunksNeeded.has(curChunk)) {
-          chunksNeeded.delete(curChunk);
-        }
+        const chunksNeeded = this.#chunksNeededByRequest.get(requestId);
+        chunksNeeded.delete(curChunk);
 
         if (chunksNeeded.size > 0) {
           continue;
