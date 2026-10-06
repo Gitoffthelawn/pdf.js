@@ -20,6 +20,7 @@ import {
   babelPluginStripSrcPath,
   preprocessPDFJSCode,
 } from "./external/builder/babel-plugin-pdfjs-preprocessor.mjs";
+import { colorize, COLORS_ENABLED } from "./external/color_utils.mjs";
 import {
   COVERAGE_FORMAT_TO_REPORTER,
   parseCoverageFormats,
@@ -28,7 +29,6 @@ import { exec, execSync, spawn, spawnSync } from "child_process";
 import { finished, pipeline as runPipeline } from "stream/promises";
 import autoprefixer from "autoprefixer";
 import { buildPrefsSchema } from "./external/chromium/prefs.mjs";
-import { colorize } from "./external/color_utils.mjs";
 import crypto from "crypto";
 import fs from "fs";
 import gulp from "gulp";
@@ -46,12 +46,10 @@ import postcssDiscardComments from "postcss-discard-comments";
 import { preprocess } from "./external/builder/builder.mjs";
 import relative from "metalsmith-html-relative";
 import rename from "gulp-rename";
-import replace from "gulp-replace";
 import stream from "stream";
 import TerserPlugin from "terser-webpack-plugin";
 import Vinyl from "vinyl";
-import webpack2 from "webpack";
-import webpackStream from "webpack-stream";
+import webpack from "webpack";
 import zip from "gulp-zip";
 
 const __dirname = import.meta.dirname;
@@ -380,7 +378,7 @@ function createWebpackConfig(
   const plugins = [];
   if (!disableLicenseHeader) {
     plugins.push(
-      new webpack2.BannerPlugin({
+      new webpack.BannerPlugin({
         banner: licenseHeaderLibre + "\n" + versionInfoHeader,
         raw: true,
       })
@@ -407,8 +405,6 @@ function createWebpackConfig(
         }
       });
       compiler.hooks.afterEmit.tap("VerifyImportMeta", compilation => {
-        // Emit the errors after emitting the files, so that it's possible to
-        // look at the contents of the invalid bundle.
         compilation.errors.push(...errors);
       });
     },
@@ -482,9 +478,64 @@ function createWebpackConfig(
   };
 }
 
-function webpack2Stream(webpackConfig) {
-  // Replacing webpack1 to webpack2 in the webpack-stream.
-  return webpackStream(webpackConfig, webpack2);
+class WebpackCompilationError extends Error {
+  // Omit the stack trace in gulp's error output.
+  showStack = false;
+}
+
+/** Bundle `entry` into an in-memory Vinyl stream. */
+function createWebpackStream(entry, webpackConfig) {
+  const outputPath = __dirname;
+  const files = [];
+  const readable = new stream.Readable({ objectMode: true, read() {} });
+
+  const compiler = webpack({
+    ...webpackConfig,
+    entry: path.resolve(entry),
+    output: {
+      ...webpackConfig.output,
+      path: outputPath,
+      compareBeforeEmit: false,
+    },
+  });
+  compiler.outputFileSystem = {
+    mkdir(_dirPath, callback) {
+      callback(null);
+    },
+    writeFile(filePath, contents, callback) {
+      files.push(new Vinyl({ base: outputPath, path: filePath, contents }));
+      callback(null);
+    },
+  };
+
+  compiler.run((runError, stats) => {
+    compiler.close(closeError => {
+      if (runError || closeError) {
+        readable.destroy(runError || closeError);
+        return;
+      }
+      console.log(
+        stats.toString({
+          colors: COLORS_ENABLED,
+          chunks: false,
+          hash: false,
+          modules: false,
+          timings: false,
+        })
+      );
+      if (stats.hasErrors()) {
+        readable.destroy(
+          new WebpackCompilationError(`Webpack failed to bundle "${entry}".`)
+        );
+        return;
+      }
+      for (const file of files) {
+        readable.push(file);
+      }
+      readable.push(null);
+    });
+  });
+  return readable;
 }
 
 /** Write a Vinyl stream to `dest` and wait for completion. */
@@ -506,8 +557,8 @@ function getErrorMessages(error) {
   if (error instanceof AggregateError) {
     return error.errors.flatMap(getErrorMessages);
   }
-  if (error?.plugin === "webpack-stream") {
-    // Avoid repeating webpack-stream's compilation diagnostics.
+  if (error instanceof WebpackCompilationError) {
+    // createWebpackStream already logged the diagnostics.
     return [];
   }
   return [
@@ -538,9 +589,7 @@ function createMainBundle(defines) {
       type: "module",
     },
   });
-  return gulp
-    .src("./src/pdf.js", { encoding: false })
-    .pipe(webpack2Stream(mainFileConfig));
+  return createWebpackStream("./src/pdf.js", mainFileConfig);
 }
 
 function createScriptingBundle(defines, extraOptions = undefined) {
@@ -554,9 +603,7 @@ function createScriptingBundle(defines, extraOptions = undefined) {
     },
     extraOptions
   );
-  return gulp
-    .src("./src/pdf.scripting.js", { encoding: false })
-    .pipe(webpack2Stream(scriptingFileConfig));
+  return createWebpackStream("./src/pdf.scripting.js", scriptingFileConfig);
 }
 
 function createSandboxExternal(defines) {
@@ -606,9 +653,7 @@ function createSandboxBundle(defines, extraOptions = undefined) {
     extraOptions
   );
 
-  return gulp
-    .src("./src/pdf.sandbox.js", { encoding: false })
-    .pipe(webpack2Stream(sandboxFileConfig));
+  return createWebpackStream("./src/pdf.sandbox.js", sandboxFileConfig);
 }
 
 function createWorkerBundle(defines) {
@@ -622,9 +667,7 @@ function createWorkerBundle(defines) {
       type: "module",
     },
   });
-  return gulp
-    .src("./src/pdf.worker.js", { encoding: false })
-    .pipe(webpack2Stream(workerFileConfig));
+  return createWebpackStream("./src/pdf.worker.js", workerFileConfig);
 }
 
 function createWebBundle(defines, options) {
@@ -634,9 +677,7 @@ function createWebBundle(defines, options) {
       type: "module",
     },
   });
-  return gulp
-    .src("./web/viewer.js", { encoding: false })
-    .pipe(webpack2Stream(viewerFileConfig));
+  return createWebpackStream("./web/viewer.js", viewerFileConfig);
 }
 
 function createGVWebBundle(defines, options) {
@@ -646,9 +687,7 @@ function createGVWebBundle(defines, options) {
       type: "module",
     },
   });
-  return gulp
-    .src("./web/viewer-geckoview.js", { encoding: false })
-    .pipe(webpack2Stream(viewerFileConfig));
+  return createWebpackStream("./web/viewer-geckoview.js", viewerFileConfig);
 }
 
 function createComponentsBundle(defines) {
@@ -658,9 +697,10 @@ function createComponentsBundle(defines) {
       type: "module",
     },
   });
-  return gulp
-    .src("./web/pdf_viewer.component.js", { encoding: false })
-    .pipe(webpack2Stream(componentsFileConfig));
+  return createWebpackStream(
+    "./web/pdf_viewer.component.js",
+    componentsFileConfig
+  );
 }
 
 function createImageDecodersBundle(defines) {
@@ -672,9 +712,10 @@ function createImageDecodersBundle(defines) {
       type: "module",
     },
   });
-  return gulp
-    .src("./src/pdf.image_decoders.js", { encoding: false })
-    .pipe(webpack2Stream(componentsFileConfig));
+  return createWebpackStream(
+    "./src/pdf.image_decoders.js",
+    componentsFileConfig
+  );
 }
 
 function createCMapBundle() {
@@ -1282,9 +1323,7 @@ function createDefaultPreferencesBundle(defines, dir) {
       disableVersionInfo: true,
     }
   );
-  return gulp
-    .src("web/app_options.js", { encoding: false })
-    .pipe(webpack2Stream(defaultPreferencesConfig));
+  return createWebpackStream("web/app_options.js", defaultPreferencesConfig);
 }
 
 function buildDefaultPreferences(defines, dir) {
@@ -2201,7 +2240,11 @@ gulp.task(
         gulp.src("LICENSE", { encoding: false }).pipe(gulp.dest(CHROMIUM_DIR)),
         gulp
           .src("extensions/chromium/manifest.json", { encoding: false })
-          .pipe(replace(/\bPDFJSSCRIPT_VERSION\b/g, version))
+          .pipe(
+            transform("utf8", content =>
+              content.toString().replaceAll(/\bPDFJSSCRIPT_VERSION\b/g, version)
+            )
+          )
           .pipe(gulp.dest(CHROMIUM_DIR)),
         gulp
           .src(["extensions/chromium/**/*.{html,js,css,png}"], {
@@ -3201,9 +3244,7 @@ function createInternalViewerBundle(defines) {
       type: "module",
     },
   });
-  return gulp
-    .src("./web/internal/debugger.js", { encoding: false })
-    .pipe(webpack2Stream(viewerFileConfig));
+  return createWebpackStream("./web/internal/debugger.js", viewerFileConfig);
 }
 
 function buildInternalViewer(defines, dir) {
@@ -3524,5 +3565,12 @@ gulp.task("externaltest", function (done) {
   safeSpawnSync("node", ["external/builder/test-fixtures_babel.mjs"], {
     stdio: "inherit",
   });
+
+  console.log("\n### Running welch_ttest_spec.js");
+  safeSpawnSync(
+    "node",
+    ["node_modules/jasmine/bin/jasmine", "test/stats/welch_ttest_spec.js"],
+    { stdio: "inherit" }
+  );
   done();
 });
