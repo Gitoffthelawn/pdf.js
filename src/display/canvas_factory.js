@@ -72,21 +72,4 @@ class BaseCanvasFactory {
   }
 }
 
-class DOMCanvasFactory extends BaseCanvasFactory {
-  constructor({ ownerDocument = globalThis.document, enableHWA = false }) {
-    super({ enableHWA });
-    this._document = ownerDocument;
-  }
-
-  /**
-   * @ignore
-   */
-  _createCanvas(width, height) {
-    const canvas = this._document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    return canvas;
-  }
-}
-
-export { BaseCanvasFactory, DOMCanvasFactory };
+export { BaseCanvasFactory };

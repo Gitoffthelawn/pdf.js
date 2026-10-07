@@ -41,6 +41,7 @@ const IMAGE_RESOURCES_PATH = "/web/images/";
 const VIEWER_CSS = "../build/components/pdf_viewer.css";
 const VIEWER_LOCALE = "en-US";
 const WORKER_SRC = "../build/generic/build/pdf.worker.mjs";
+const RENDERER_SRC = "../build/generic/build/pdf.renderer.mjs";
 const RENDER_TASK_ON_CONTINUE_DELAY = 5; // ms
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -534,6 +535,7 @@ class Driver {
   constructor(options) {
     // Configure the global worker options.
     GlobalWorkerOptions.workerSrc = WORKER_SRC;
+    GlobalWorkerOptions.rendererSrc = RENDERER_SRC;
 
     // We only need to initialize the `L10n`-instance here, since translation is
     // triggered by a `MutationObserver`; see e.g. `Rasterize.annotationLayer`.
@@ -988,11 +990,21 @@ class Driver {
     // Wipe out the link to the pdfdoc so it can be GC'ed.
     for (const task of [this.currentTask, ...this.taskQueue]) {
       if (task?.pdfDoc) {
-        destroyedPromises.push(task.pdfDoc.loadingTask.destroy());
+        destroyedPromises.push(
+          this.#destroyLoadingTask(task.pdfDoc.loadingTask)
+        );
         delete task.pdfDoc;
       }
     }
     return Promise.all(destroyedPromises);
+  }
+
+  async #destroyLoadingTask(loadingTask) {
+    if (window.__coverage__) {
+      // Collect coverage before destroy() terminates the renderer worker.
+      await fetchAndMergeWorkerCoverage(loadingTask._rendererWorker);
+    }
+    await loadingTask.destroy();
   }
 
   _exceptionToString(e) {

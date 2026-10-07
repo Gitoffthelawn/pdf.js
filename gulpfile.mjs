@@ -27,6 +27,7 @@ import {
 } from "./external/ccov/coverage_format.mjs";
 import { exec, execSync, spawn, spawnSync } from "child_process";
 import { finished, pipeline as runPipeline } from "stream/promises";
+import { Marked, TextRenderer } from "marked";
 import autoprefixer from "autoprefixer";
 import { buildPrefsSchema } from "./external/chromium/prefs.mjs";
 import crypto from "crypto";
@@ -35,16 +36,13 @@ import gulp from "gulp";
 import hljs from "highlight.js";
 import istanbulCoverage from "istanbul-lib-coverage";
 import istanbulReportGenerator from "istanbul-reports";
-import layouts from "@metalsmith/layouts";
+import layout from "./docs/templates/layout.js";
 import libReport from "istanbul-lib-report";
-import markdown from "@metalsmith/markdown";
-import Metalsmith from "metalsmith";
 import ordered from "ordered-read-streams";
 import path from "path";
 import postcss from "gulp-postcss";
 import postcssDiscardComments from "postcss-discard-comments";
 import { preprocess } from "./external/builder/builder.mjs";
-import relative from "metalsmith-html-relative";
 import rename from "gulp-rename";
 import stream from "stream";
 import TerserPlugin from "terser-webpack-plugin";
@@ -670,6 +668,22 @@ function createWorkerBundle(defines) {
   return createWebpackStream("./src/pdf.worker.js", workerFileConfig);
 }
 
+function createRendererWorkerBundle(defines) {
+  const rendererWorkerDefines = {
+    ...defines,
+    WORKER_THREAD: true,
+  };
+  const rendererWorkerFileConfig = createWebpackConfig(rendererWorkerDefines, {
+    filename: rendererWorkerDefines.MINIFIED
+      ? "pdf.renderer.min.mjs"
+      : "pdf.renderer.mjs",
+    library: {
+      type: "module",
+    },
+  });
+  return createWebpackStream("./src/pdf.renderer.js", rendererWorkerFileConfig);
+}
+
 function createWebBundle(defines, options) {
   const viewerFileConfig = createWebpackConfig(defines, {
     filename: "viewer.mjs",
@@ -808,12 +822,6 @@ function checkDir(dirPath) {
   } catch {
     return false;
   }
-}
-
-function replaceInFile(filePath, find, replacement) {
-  let content = fs.readFileSync(filePath).toString();
-  content = content.replace(find, replacement);
-  fs.writeFileSync(filePath, content);
 }
 
 function getTempFile(prefix, suffix) {
@@ -1487,6 +1495,7 @@ function buildGeneric(defines, dir) {
   return ordered([
     createMainBundle(defines).pipe(gulp.dest(dir + "build")),
     createWorkerBundle(defines).pipe(gulp.dest(dir + "build")),
+    createRendererWorkerBundle(defines).pipe(gulp.dest(dir + "build")),
     createSandboxBundle(defines).pipe(gulp.dest(dir + "build")),
     createWebBundle(defines).pipe(gulp.dest(dir + "web")),
     gulp
@@ -1631,6 +1640,7 @@ function buildMinified(defines, dir) {
   return ordered([
     createMainBundle(defines).pipe(gulp.dest(dir + "build")),
     createWorkerBundle(defines).pipe(gulp.dest(dir + "build")),
+    createRendererWorkerBundle(defines).pipe(gulp.dest(dir + "build")),
     createSandboxBundle(defines).pipe(gulp.dest(dir + "build")),
     createImageDecodersBundle({ ...defines, IMAGE_DECODERS: true }).pipe(
       gulp.dest(dir + "image_decoders")
@@ -1761,6 +1771,10 @@ async function buildMozcentral(changedFiles = null) {
       create: () => createScriptingBundle(defines),
     },
     { bundle: "pdf.worker.mjs", create: () => createWorkerBundle(defines) },
+    {
+      bundle: "pdf.renderer.mjs",
+      create: () => createRendererWorkerBundle(defines),
+    },
     {
       files: /^src\/pdf\.sandbox\.external\.js$/,
       create: () => createSandboxExternal(defines),
@@ -2199,6 +2213,9 @@ gulp.task(
         createWorkerBundle(defines).pipe(
           gulp.dest(CHROME_BUILD_CONTENT_DIR + "build")
         ),
+        createRendererWorkerBundle(defines).pipe(
+          gulp.dest(CHROME_BUILD_CONTENT_DIR + "build")
+        ),
         createSandboxBundle(defines).pipe(
           gulp.dest(CHROME_BUILD_CONTENT_DIR + "build")
         ),
@@ -2396,7 +2413,7 @@ function buildLib(defines, dir) {
     gulp.src(
       [
         "src/{core,display,shared}/**/*.js",
-        "src/{pdf,pdf.image_decoders,pdf.worker}.js",
+        "src/{pdf,pdf.image_decoders,pdf.worker,pdf.renderer}.js",
       ],
       { base: "src/", encoding: false, sourcemaps: enableSourceMaps }
     ),
@@ -2871,7 +2888,13 @@ gulp.task("lint-chmod", function (done) {
   console.log("\n### Checking executable bit on tracked and untracked files");
 
   // Files allowed to keep the executable bit (shebang scripts).
-  const EXECUTABLE_FILES = new Set(["test/chromium/test-telemetry.js"]);
+  const EXECUTABLE_FILES = new Set([
+    ".github/scripts/viewer-preview/check-pr.sh",
+    ".github/scripts/viewer-preview/prepare-site.sh",
+    ".github/scripts/viewer-preview/publish-pages.sh",
+    ".github/scripts/viewer-preview/update-comment.sh",
+    "test/chromium/test-telemetry.js",
+  ]);
 
   // Cover untracked-but-not-ignored files too: a `gulp lint` run before
   // `git add` would otherwise miss any 0755 file the developer just created.
@@ -3076,7 +3099,7 @@ gulp.task("lint", function (done) {
       return;
     }
 
-    gulp.series("lint-licenses", "lint-chmod", "lint-bom")(done);
+    gulp.series("lint-licenses", "lint-chmod", "lint-bom", "lint-docs")(done);
   });
 });
 
@@ -3253,6 +3276,7 @@ function buildInternalViewer(defines, dir) {
   return ordered([
     createMainBundle(defines).pipe(gulp.dest(dir + "build")),
     createWorkerBundle(defines).pipe(gulp.dest(dir + "build")),
+    createRendererWorkerBundle(defines).pipe(gulp.dest(dir + "build")),
     createInternalViewerBundle(defines).pipe(gulp.dest(dir + "web")),
     preprocessHTML("web/internal/debugger.html", defines).pipe(
       gulp.dest(dir + "web")
@@ -3309,47 +3333,146 @@ function ghPagesPrepare() {
   ]);
 }
 
-gulp.task("metalsmith", async function () {
-  return new Promise((resolve, reject) => {
-    Metalsmith(__dirname)
-      .source("docs/contents")
-      .destination(GH_PAGES_DIR)
-      .clean(false)
-      .metadata({
-        sitename: "PDF.js",
-        siteurl: "https://mozilla.github.io/pdf.js",
-        description:
-          "A general-purpose, web standards-based platform for parsing and rendering PDFs.",
-      })
-      .use(
-        markdown({
-          engineOptions: {
-            highlight: (code, language) =>
-              hljs.highlight(code, { language }).value,
-          },
-        })
-      )
-      .use(
-        layouts({
-          directory: "docs/templates",
-          pattern: "**",
-          transform: "nunjucks",
-        })
-      )
-      .use(relative())
-      .build(error => {
-        if (error) {
-          reject(error);
-          return;
+const DOCS_DIR = "docs/contents/";
+
+// Supported Markdown tokens. Check link rewriting and heading IDs before
+// adding more.
+const DOCS_MARKDOWN_TOKENS = new Set([
+  "code",
+  "codespan",
+  "heading",
+  "html",
+  "link",
+  "list",
+  "list_item",
+  "paragraph",
+  "space",
+  "text",
+]);
+
+// Required page metadata.
+const DOCS_FRONT_MATTER_KEYS = ["slug", "title"];
+
+/**
+ * Return rendered HTML pages keyed by their output path.
+ */
+function renderDocs() {
+  const metadata = {
+    sitename: "PDF.js",
+    description:
+      "A general-purpose, web standards-based platform for parsing and rendering PDFs.",
+  };
+  const pages = new Map();
+  // Plain text of the headings, without inline HTML, for their IDs.
+  const headingTextRenderer = new TextRenderer();
+  headingTextRenderer.html = () => "";
+
+  for (const file of fs.readdirSync(DOCS_DIR, { recursive: true })) {
+    if (!file.endsWith(".md")) {
+      continue;
+    }
+    const filePath = DOCS_DIR + file.replaceAll(path.sep, "/");
+    const fail = message => {
+      throw new Error(`${filePath}: ${message}`);
+    };
+
+    const [, frontMatter, markdown] =
+      /^---\n(.*?)\n---\n(.*)$/s.exec(fs.readFileSync(filePath, "utf8")) ??
+      fail("missing front matter.");
+    const data = {};
+    for (const line of frontMatter.split("\n")) {
+      const [, key, value] = /^(\w+): (.*)$/.exec(line) ?? [];
+      if (!DOCS_FRONT_MATTER_KEYS.includes(key)) {
+        fail(`unsupported front matter "${line}".`);
+      }
+      data[key] = value;
+    }
+    for (const key of DOCS_FRONT_MATTER_KEYS) {
+      if (!(key in data)) {
+        fail(`missing "${key}" in the front matter.`);
+      }
+    }
+
+    const ids = new Set();
+    const marked = new Marked({
+      renderer: {
+        // Preserve existing heading IDs for links such as #download.
+        heading({ depth, tokens }) {
+          const slug = this.parser
+            .parseInline(tokens, headingTextRenderer)
+            .toLowerCase()
+            .trim()
+            .replaceAll(/[^\p{L}\p{N}\s_-]/gu, "")
+            .replaceAll(/\s/g, "-");
+          let id = slug;
+          for (let i = 1; ids.has(id); i++) {
+            id = `${slug}-${i}`;
+          }
+          ids.add(id);
+          return `<h${depth} id="${id}">${this.parser.parseInline(tokens)}</h${depth}>\n`;
+        },
+      },
+      walkTokens(token) {
+        if (!DOCS_MARKDOWN_TOKENS.has(token.type)) {
+          fail(`unsupported Markdown "${token.type}": "${token.raw}".`);
         }
-        replaceInFile(
-          `${GH_PAGES_DIR}/getting_started/index.html`,
-          /STABLE_VERSION/g,
-          config.stableVersion
-        );
-        resolve();
-      });
+        if (token.type === "code" && token.lang) {
+          if (!hljs.getLanguage(token.lang)) {
+            fail(`unsupported code language "${token.lang}".`);
+          }
+          token.text = hljs.highlight(token.text, {
+            language: token.lang,
+          }).value;
+          token.escaped = true;
+        }
+      },
+    });
+
+    const htmlFile = file.replace(/\.md$/, ".html").replaceAll(path.sep, "/");
+    const dir = path.posix.dirname(htmlFile);
+    const html = layout({
+      ...metadata,
+      ...data,
+      contents: marked.parse(markdown),
+    })
+      // Rewrite quoted root-relative href/src URLs relative to this page.
+      .replaceAll(
+        /(\s(?:href|src)=)(["'])\/(?!\/)(.*?)\2/g,
+        (_, prefix, quote, url) =>
+          `${prefix}${quote}${path.posix.relative(dir, url) || "."}${quote}`
+      )
+      .replaceAll("STABLE_VERSION", config.stableVersion);
+
+    const absoluteURL =
+      /\s(?:href|src|srcset|action|poster|data-src)=["']?\/(?!\/)[^\s>]*/.exec(
+        html
+      );
+    if (absoluteURL) {
+      fail(`unsupported absolute local URL:${absoluteURL[0]}`);
+    }
+    pages.set(htmlFile, html);
+  }
+  return pages;
+}
+
+gulp.task("docs", function (done) {
+  fs.cpSync(DOCS_DIR, GH_PAGES_DIR, {
+    recursive: true,
+    filter: src => !src.endsWith(".md"),
   });
+  for (const [htmlFile, html] of renderDocs()) {
+    fs.mkdirSync(path.dirname(GH_PAGES_DIR + htmlFile), { recursive: true });
+    fs.writeFileSync(GH_PAGES_DIR + htmlFile, html);
+  }
+  done();
+});
+
+gulp.task("lint-docs", function (done) {
+  console.log("\n### Checking the web site files");
+
+  renderDocs();
+  console.log("files checked, no errors found");
+  done();
 });
 
 gulp.task(
@@ -3360,7 +3483,7 @@ gulp.task(
     "internal-viewer",
     "jsdoc",
     ghPagesPrepare,
-    "metalsmith"
+    "docs"
   )
 );
 
@@ -3471,8 +3594,10 @@ gulp.task(
         gulp
           .src(
             [
-              GENERIC_DIR + "build/{pdf,pdf.worker,pdf.sandbox}.mjs",
-              GENERIC_DIR + "build/{pdf,pdf.worker,pdf.sandbox}.mjs.map",
+              GENERIC_DIR +
+                "build/{pdf,pdf.worker,pdf.sandbox,pdf.renderer}.mjs",
+              GENERIC_DIR +
+                "build/{pdf,pdf.worker,pdf.sandbox,pdf.renderer}.mjs.map",
             ],
             { encoding: false }
           )
@@ -3480,16 +3605,22 @@ gulp.task(
         gulp
           .src(
             [
-              GENERIC_LEGACY_DIR + "build/{pdf,pdf.worker,pdf.sandbox}.mjs",
-              GENERIC_LEGACY_DIR + "build/{pdf,pdf.worker,pdf.sandbox}.mjs.map",
+              GENERIC_LEGACY_DIR +
+                "build/{pdf,pdf.worker,pdf.sandbox,pdf.renderer}.mjs",
+              GENERIC_LEGACY_DIR +
+                "build/{pdf,pdf.worker,pdf.sandbox,pdf.renderer}.mjs.map",
             ],
             { encoding: false }
           )
           .pipe(gulp.dest(DIST_DIR + "legacy/build/")),
         gulp
-          .src(MINIFIED_DIR + "build/{pdf,pdf.worker,pdf.sandbox}.min.mjs", {
-            encoding: false,
-          })
+          .src(
+            MINIFIED_DIR +
+              "build/{pdf,pdf.worker,pdf.sandbox,pdf.renderer}.min.mjs",
+            {
+              encoding: false,
+            }
+          )
           .pipe(gulp.dest(DIST_DIR + "build/")),
         gulp
           .src(MINIFIED_DIR + "image_decoders/pdf.image_decoders.min.mjs", {
@@ -3498,7 +3629,8 @@ gulp.task(
           .pipe(gulp.dest(DIST_DIR + "image_decoders/")),
         gulp
           .src(
-            MINIFIED_LEGACY_DIR + "build/{pdf,pdf.worker,pdf.sandbox}.min.mjs",
+            MINIFIED_LEGACY_DIR +
+              "build/{pdf,pdf.worker,pdf.sandbox,pdf.renderer}.min.mjs",
             { encoding: false }
           )
           .pipe(gulp.dest(DIST_DIR + "legacy/build/")),
