@@ -39,11 +39,12 @@
 
 "use strict";
 
-import { PDFWorker, RendererWorker } from "pdfjs/display/api.js";
 import { GlobalWorkerOptions } from "pdfjs/display/worker_options.js";
 import { isNodeJS } from "../../src/shared/util.js";
 import { mergeCoverageIntoGlobal } from "../coverage_utils.js";
 import { MessageHandler } from "pdfjs/shared/message_handler.js";
+import { PDFWorker } from "pdfjs/display/api.js";
+import { RendererWorker } from "pdfjs/display/renderer_worker_proxy.js";
 import { TestReporter } from "../reporter.js";
 
 async function initializePDFJS(callback) {
@@ -67,6 +68,7 @@ async function initializePDFJS(callback) {
       "pdfjs-test/unit/default_appearance_spec.js",
       "pdfjs-test/unit/display_utils_spec.js",
       "pdfjs-test/unit/document_spec.js",
+      "pdfjs-test/unit/dom_utils_spec.js",
       "pdfjs-test/unit/editor_spec.js",
       "pdfjs-test/unit/encodings_spec.js",
       "pdfjs-test/unit/evaluator_spec.js",
