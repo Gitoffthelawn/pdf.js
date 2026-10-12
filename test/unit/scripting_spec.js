@@ -122,6 +122,96 @@ describe("Scripting", function () {
         formattedValue: null,
       });
     });
+
+    it("should check the radio button matching the field value", async () => {
+      const refIds = [getId(), getId()];
+      sandbox.createSandbox({
+        appInfo: { language: "en-US", platform: "Linux x86_64" },
+        objects: {
+          radio: [
+            {
+              id: refIds[0],
+              value: "Second",
+              exportValues: "First",
+              actions: {},
+              type: "radiobutton",
+            },
+            {
+              id: refIds[1],
+              exportValues: "Second",
+              actions: {},
+              type: "radiobutton",
+            },
+          ],
+        },
+        calculationOrder: [],
+      });
+
+      const value = await myeval(
+        `[0, 1].map(i => getField("radio").isBoxChecked(i))`
+      );
+      expect(value).toEqual([false, true]);
+    });
+
+    it("should let scripts declare variables named like internal ones", async () => {
+      sandbox.createSandbox({
+        appInfo: { language: "en-US", platform: "Linux x86_64" },
+        objects: {},
+        calculationOrder: [],
+      });
+      const names = [
+        "AForm",
+        "App",
+        "Border",
+        "Color",
+        "Console",
+        "Doc",
+        "Field",
+        "Util",
+        "initSandbox",
+      ];
+
+      const types = await myeval(
+        `[${names.map(name => `typeof ${name}`).join(", ")}]`
+      );
+      expect(types).toEqual(names.map(() => "undefined"));
+
+      const value = await myeval(
+        `globalThis.eval("${names.map(name => `var ${name} = 1;`).join(" ")} 123")`
+      );
+      expect(value).toEqual(123);
+    });
+
+    it("should select the items of a choice field by index", async () => {
+      const refId = getId();
+      sandbox.createSandbox({
+        appInfo: { language: "en-US", platform: "Linux x86_64" },
+        objects: {
+          list: [
+            {
+              id: refId,
+              value: "A",
+              items: Array.from("abcdefghijk", c => ({
+                displayValue: c,
+                exportValue: c.toUpperCase(),
+              })),
+              actions: {},
+              type: "listbox",
+            },
+          ],
+        },
+        calculationOrder: [],
+      });
+
+      await myeval(`(getField("list").currentValueIndices = 1, 0)`);
+      expect(send_queue.get(refId).indices).toEqual([1]);
+      expect(await myeval(`getField("list").value`)).toEqual("B");
+
+      await myeval(`(getField("list").multipleSelection = true, 0)`);
+      await myeval(`(getField("list").currentValueIndices = [10, 2], 0)`);
+      expect(send_queue.get(refId).indices).toEqual([2, 10]);
+      expect(await myeval(`getField("list").value`)).toEqual(["C", "K"]);
+    });
   });
 
   describe("Doc", function () {
@@ -246,6 +336,28 @@ describe("Scripting", function () {
       );
       expect(values).toEqual(["", "", "hello"]);
     });
+
+    it("should run OpenAction once, after formatting", async () => {
+      const push = name => `(globalThis.run ??= []).push("${name}");`;
+      sandbox.createSandbox({
+        appInfo: { language: "en-US", platform: "Linux x86_64" },
+        docInfo: { actions: { OpenAction: [push("OpenAction")] } },
+        objects: {
+          field: [
+            {
+              id: getId(),
+              value: "",
+              actions: { Format: [push("Format")] },
+              type: "text",
+            },
+          ],
+        },
+        calculationOrder: [],
+      });
+
+      await sandbox.dispatchEventInSandbox({ id: "doc", name: "Open" });
+      expect(await myeval(`globalThis.run`)).toEqual(["Format", "OpenAction"]);
+    });
   });
 
   describe("Util", function () {
@@ -305,6 +417,13 @@ describe("Scripting", function () {
 
         value = await myeval(`util.scand("mmddyyyy", "07a15b2007").toString()`);
         expect(new Date(value)).toEqual(new Date("07/15/2007 12:00:00"));
+      });
+
+      it("should parse several dates with the same format", async () => {
+        const value = await myeval(
+          `["3:30 pm", "4:45 pm", "9:15 pm"].map(d => util.scand("h:MM tt", d).getHours())`
+        );
+        expect(value).toEqual([15, 16, 21]);
       });
 
       it("should handle a format with repeated specifiers", async () => {

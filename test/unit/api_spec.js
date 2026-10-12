@@ -5579,14 +5579,18 @@ have written that much by now. So, here’s to squashing bugs.`);
       const pdfDoc = await loadingTask.promise;
       const pdfPage = await pdfDoc.getPage(1);
       await pdfPage.getOperatorList();
-      const stats = pdfPage.stats;
 
+      const { stats } = pdfPage;
       expect(stats).toBeInstanceOf(StatTimer);
       expect(stats.times.length).toEqual(1);
 
       const [statEntry] = stats.times;
+
       expect(statEntry.name).toEqual("Page Request");
-      expect(statEntry.end - statEntry.start).toBeGreaterThanOrEqual(0);
+      const duration = statEntry.end - statEntry.start;
+      expect(duration).toBeGreaterThanOrEqual(0);
+
+      expect(stats.toString()).toEqual(`Page Request ${duration}ms\n`);
 
       await loadingTask.destroy();
     });
@@ -5619,14 +5623,25 @@ have written that much by now. So, here’s to squashing bugs.`);
       expect(stats.times.length).toEqual(3);
 
       const [statEntryOne, statEntryTwo, statEntryThree] = stats.times;
+
       expect(statEntryOne.name).toEqual("Page Request");
-      expect(statEntryOne.end - statEntryOne.start).toBeGreaterThanOrEqual(0);
+      const durationOne = statEntryOne.end - statEntryOne.start;
+      expect(durationOne).toBeGreaterThanOrEqual(0);
 
       expect(statEntryTwo.name).toEqual("Rendering");
-      expect(statEntryTwo.end - statEntryTwo.start).toBeGreaterThan(0);
+      const durationTwo = statEntryTwo.end - statEntryTwo.start;
+      expect(durationTwo).toBeGreaterThan(0);
 
       expect(statEntryThree.name).toEqual("Overall");
-      expect(statEntryThree.end - statEntryThree.start).toBeGreaterThan(0);
+      const durationThree = statEntryThree.end - statEntryThree.start;
+      expect(durationThree).toBeGreaterThan(0);
+
+      const expectedString = [
+        `Page Request ${durationOne}ms\n`,
+        `Rendering    ${durationTwo}ms\n`,
+        `Overall      ${durationThree}ms\n`,
+      ].join("");
+      expect(stats.toString()).toEqual(expectedString);
 
       canvasFactory.destroy(canvasAndCtx);
       await loadingTask.destroy();
@@ -6593,6 +6608,87 @@ have written that much by now. So, here’s to squashing bugs.`);
       // The page should render completely white.
       expect(uint32Img2.every(p => p === WHITE)).toBeTrue();
       canvasFactory.destroy(canvasAndCtx2);
+
+      await loadingTask.destroy();
+    });
+
+    it("re-uses the operator list in the renderer worker", async function () {
+      if (isNodeJS) {
+        pending("Worker rendering is not supported in Node.js.");
+      }
+      const BLACK = FeatureTest.isLittleEndian ? 0xff000000 : 0x000000ff,
+        WHITE = 0xffffffff;
+
+      const loadingTask = getDocument(buildGetDocumentParams("clippath.pdf"));
+      const pdfDoc = await loadingTask.promise;
+      const pdfPage = await pdfDoc.getPage(1);
+      const viewport = pdfPage.getViewport({ scale: 1 });
+      const { canvasFactory } = pdfDoc;
+
+      const { messageHandler } = pdfDoc._transport.rendererWorker;
+      spyOn(messageHandler, "send").and.callThrough();
+      const countSentOperators = () =>
+        messageHandler.send.calls
+          .allArgs()
+          .filter(([action]) => action === "AppendOperatorList")
+          .reduce((count, [, { fnArray }]) => count + fnArray.length, 0);
+
+      const render = async operationsFilter => {
+        const canvasAndCtx = canvasFactory.create(
+          viewport.width,
+          viewport.height
+        );
+        const renderTask = pdfPage.render({
+          canvas: canvasAndCtx.canvas,
+          viewport,
+          operationsFilter,
+        });
+        expect(renderTask.isWorkerRendering).toBeTrue();
+        await renderTask.promise;
+
+        const numPixels = { black: 0, white: 0, other: 0 };
+        for (const p of new Uint32Array(
+          canvasAndCtx.context.getImageData(
+            0,
+            0,
+            viewport.width,
+            viewport.height
+          ).data.buffer
+        )) {
+          if (p === BLACK) {
+            numPixels.black++;
+          } else if (p === WHITE) {
+            numPixels.white++;
+          } else {
+            numPixels.other++;
+          }
+        }
+        canvasFactory.destroy(canvasAndCtx);
+        return { numPixels, operatorList: renderTask.getOperatorList() };
+      };
+      const NORMAL = { black: 7200, white: 12800, other: 0 },
+        FILTERED = { black: 0, white: 20000, other: 0 };
+      const skipPaths = (i, operatorList) =>
+        operatorList.fnArray[i] !== OPS.constructPath;
+
+      const first = await render();
+      expect(first.numPixels).toEqual(NORMAL);
+      const { length } = first.operatorList.fnArray;
+      expect(countSentOperators()).toEqual(length);
+
+      // Concurrent filtered and unfiltered renders reuse the cached operators.
+      const [filtered, normal] = await Promise.all([
+        render(skipPaths),
+        render(),
+      ]);
+      expect(filtered.numPixels).toEqual(FILTERED);
+      expect(normal.numPixels).toEqual(NORMAL);
+      expect(countSentOperators()).toEqual(length);
+
+      // Page cleanup clears the worker's operator cache.
+      expect(pdfPage.cleanup()).toBeTrue();
+      expect((await render()).numPixels).toEqual(NORMAL);
+      expect(countSentOperators()).toEqual(2 * length);
 
       await loadingTask.destroy();
     });
