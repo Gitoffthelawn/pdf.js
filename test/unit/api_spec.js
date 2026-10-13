@@ -3883,6 +3883,112 @@ describe("api", function () {
       await loadingTask.destroy();
     });
 
+    it("write an updated stamp annotation without alt text in a tagged pdf, save and check the structure tree", async function () {
+      let loadingTask = getDocument(buildGetDocumentParams("stamps.pdf"));
+      let pdfDoc = await loadingTask.promise;
+      pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_4", {
+        annotationType: AnnotationEditorType.STAMP,
+        pageIndex: 0,
+        rect: [335.1, 394.83, 487.17, 521.47],
+        rotation: 0,
+        isSvg: false,
+        structTreeParentId: null,
+        accessibilityData: {
+          type: "Figure",
+          alt: "",
+          structParent: 0,
+        },
+        id: "58R",
+      });
+
+      const data = await pdfDoc.saveDocument();
+      await loadingTask.destroy();
+
+      loadingTask = getDocument({ data });
+      pdfDoc = await loadingTask.promise;
+      const page = await pdfDoc.getPage(1);
+      const tree = await page.getStructTree();
+
+      expect(tree.children).toEqual([
+        {
+          role: "Figure",
+          children: [
+            {
+              type: "annotation",
+              id: "pdfjs_internal_id_58R",
+            },
+          ],
+        },
+      ]);
+
+      await loadingTask.destroy();
+    });
+
+    it("write an updated stamp annotation without alt text in a tagged pdf, with an ActualText, save and check the structure tree", async function () {
+      const stampData = {
+        annotationType: AnnotationEditorType.STAMP,
+        pageIndex: 0,
+        rect: [335.1, 394.83, 487.17, 521.47],
+        rotation: 0,
+        isSvg: false,
+        structTreeParentId: null,
+        id: "58R",
+      };
+      let loadingTask = getDocument(buildGetDocumentParams("stamps.pdf"));
+      let pdfDoc = await loadingTask.promise;
+      pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_4", {
+        ...stampData,
+        accessibilityData: {
+          type: "Figure",
+          alt: "",
+          actualText: "An elephant with a red hat",
+          structParent: 0,
+        },
+      });
+
+      let data = await pdfDoc.saveDocument();
+      await loadingTask.destroy();
+
+      loadingTask = getDocument({ data });
+      pdfDoc = await loadingTask.promise;
+      let page = await pdfDoc.getPage(1);
+      let tree = await page.getStructTree();
+
+      // ActualText supplies the label when Alt is missing.
+      expect(tree.children[0].alt).toEqual("An elephant with a red hat");
+
+      pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_4", {
+        ...stampData,
+        accessibilityData: {
+          type: "Figure",
+          alt: "",
+          structParent: 0,
+        },
+      });
+
+      data = await pdfDoc.saveDocument();
+      await loadingTask.destroy();
+
+      loadingTask = getDocument({ data });
+      pdfDoc = await loadingTask.promise;
+      page = await pdfDoc.getPage(1);
+      tree = await page.getStructTree();
+
+      expect(tree.children).toEqual([
+        {
+          role: "Figure",
+          children: [
+            {
+              type: "annotation",
+              id: "pdfjs_internal_id_58R",
+            },
+          ],
+        },
+      ]);
+
+      await loadingTask.destroy();
+    });
+
     it("read content from multiline textfield containing an empty line", async function () {
       const loadingTask = getDocument(buildGetDocumentParams("issue17492.pdf"));
       const pdfDoc = await loadingTask.promise;
@@ -5759,6 +5865,47 @@ have written that much by now. So, here’s to squashing bugs.`);
       canvasFactory.destroy(canvasAndCtx);
     });
 
+    it("rejects when a Type3 glyph throws while recording", async function () {
+      if (isNodeJS) {
+        pending("@napi-rs/canvas accepts negative gradient radii.");
+      }
+      // The glyph's negative shading radius makes createRadialGradient throw.
+      const loadingTask = getDocument(
+        buildGetDocumentParams("type3_glyph_error.pdf", {
+          disableWorkerRendering: true,
+        })
+      );
+      const pdfDoc = await loadingTask.promise;
+      const pdfPage = await pdfDoc.getPage(1);
+      const viewport = pdfPage.getViewport({ scale: 1 });
+
+      const { canvasFactory } = pdfDoc;
+      const canvasAndCtx = canvasFactory.create(
+        viewport.width,
+        viewport.height
+      );
+      for (const recordOptions of [
+        { recordImages: true },
+        { recordOperations: true },
+      ]) {
+        for (let i = 0; i < 2; i++) {
+          const renderTask = pdfPage.render({
+            canvas: canvasAndCtx.canvas,
+            viewport,
+            ...recordOptions,
+          });
+          await expectAsync(renderTask.promise).toBeRejectedWith(
+            jasmine.objectContaining({ name: "IndexSizeError" })
+          );
+          // Cancelling runs the completion callback again.
+          expect(() => renderTask.cancel()).not.toThrow();
+        }
+      }
+
+      canvasFactory.destroy(canvasAndCtx);
+      await loadingTask.destroy();
+    });
+
     it("renders a page renumbered while its operator list was pending", async function () {
       const loadingTask = getDocument(buildGetDocumentParams(basicApiFileName));
       const pdfDoc = await loadingTask.promise;
@@ -5816,6 +5963,72 @@ have written that much by now. So, here’s to squashing bugs.`);
       for (const annotationCanvas of annotationCanvasMap.values()) {
         expect(annotationCanvas).toBeInstanceOf(HTMLCanvasElement);
       }
+
+      await loadingTask.destroy();
+    });
+
+    it("renders a tiling pattern in the worker after a main-thread render", async function () {
+      if (isNodeJS) {
+        pending("Worker rendering is not supported in Node.js.");
+      }
+      const loadingTask = getDocument(
+        buildGetDocumentParams("tiling-pattern-large-steps.pdf")
+      );
+      const pdfDoc = await loadingTask.promise;
+      const pdfPage = await pdfDoc.getPage(1);
+      const viewport = pdfPage.getViewport({ scale: 0.25 });
+      const { canvasFactory } = pdfDoc;
+
+      for (const useCanvasContext of [true, false]) {
+        const canvasAndCtx = canvasFactory.create(
+          viewport.width,
+          viewport.height
+        );
+        const renderTask = pdfPage.render(
+          useCanvasContext
+            ? { canvasContext: canvasAndCtx.context, viewport }
+            : { canvas: canvasAndCtx.canvas, viewport }
+        );
+        expect(renderTask.isWorkerRendering).toEqual(!useCanvasContext);
+        await renderTask.promise;
+
+        const { data } = canvasAndCtx.context.getImageData(
+          viewport.width / 2,
+          viewport.height / 2,
+          1,
+          1
+        );
+        expect(Array.from(data)).toEqual([255, 0, 0, 255]);
+        canvasFactory.destroy(canvasAndCtx);
+      }
+
+      await loadingTask.destroy();
+    });
+
+    it("renders into a zero-width canvas", async function () {
+      if (isNodeJS) {
+        pending("Worker rendering is not supported in Node.js.");
+      }
+      const loadingTask = getDocument(buildGetDocumentParams("bug1844576.pdf"));
+      const pdfDoc = await loadingTask.promise;
+      const pdfPage = await pdfDoc.getPage(1);
+
+      const viewport = pdfPage.getViewport({ scale: 1 });
+      const canvas = document.createElement("canvas");
+      canvas.width = 0;
+      canvas.height = viewport.height;
+      const annotationCanvasMap = new Map();
+
+      const renderTask = pdfPage.render({
+        canvas,
+        viewport,
+        annotationMode: AnnotationMode.ENABLE_FORMS,
+        annotationCanvasMap,
+      });
+      expect(renderTask.isWorkerRendering).toBeTrue();
+      await renderTask.promise;
+
+      expect([...annotationCanvasMap.keys()].sort()).toEqual(["12R", "9R"]);
 
       await loadingTask.destroy();
     });
@@ -6020,6 +6233,34 @@ have written that much by now. So, here’s to squashing bugs.`);
 
     it("uses the device pixel ratio for image smoothing on the main-thread", async function () {
       await checkImageSmoothingPixelRatio(/* disableWorkerRendering = */ true);
+    });
+
+    it("creates the canvas context with the same options on both paths", async function () {
+      if (isNodeJS) {
+        pending("Worker rendering is not supported in Node.js.");
+      }
+      for (const disableWorkerRendering of [false, true]) {
+        const loadingTask = getDocument(
+          buildGetDocumentParams(basicApiFileName, { disableWorkerRendering })
+        );
+        const pdfDoc = await loadingTask.promise;
+        const pdfPage = await pdfDoc.getPage(1);
+        const viewport = pdfPage.getViewport({ scale: 0.5 });
+
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const renderTask = pdfPage.render({ canvas, viewport });
+        expect(renderTask.isWorkerRendering).toEqual(!disableWorkerRendering);
+        await renderTask.promise;
+
+        // Reuse the context created during rendering.
+        const attributes = canvas.getContext("2d").getContextAttributes();
+        expect(attributes.alpha).toBeFalse();
+        expect(attributes.willReadFrequently).toBeTrue();
+
+        await loadingTask.destroy();
+      }
     });
 
     it("cleans up document resources during rendering of page", async function () {
@@ -6691,6 +6932,90 @@ have written that much by now. So, here’s to squashing bugs.`);
       expect(countSentOperators()).toEqual(2 * length);
 
       await loadingTask.destroy();
+    });
+
+    it("should Wasm-decode images if multiple PDFs are parsed in parallel in one worker (issue 22131)", async function () {
+      if (isNodeJS) {
+        pending("Worker is not supported in Node.js.");
+      }
+      const BLACK = FeatureTest.isLittleEndian ? 0xff000000 : 0x000000ff,
+        WHITE = 0xffffffff;
+
+      async function renderPage(pdfDoc, noOtherPixels = false) {
+        const pdfPage = await pdfDoc.getPage(1);
+        const viewport = pdfPage.getViewport({ scale: 1 });
+
+        const { canvasFactory } = pdfDoc;
+
+        const canvasAndCtx = canvasFactory.create(
+          viewport.width,
+          viewport.height
+        );
+        const renderTask = pdfPage.render({
+          canvas: canvasAndCtx.canvas,
+          viewport,
+        });
+        expect(renderTask).toBeInstanceOf(RenderTask);
+
+        await renderTask.promise;
+
+        const numPixels = { black: 0, white: 0, other: 0 };
+        for (const p of new Uint32Array(
+          canvasAndCtx.context.getImageData(
+            0,
+            0,
+            viewport.width,
+            viewport.height
+          ).data.buffer
+        )) {
+          if (p === BLACK) {
+            numPixels.black++;
+          } else if (p === WHITE) {
+            numPixels.white++;
+          } else {
+            numPixels.other++;
+          }
+        }
+        expect(numPixels.black).toBeGreaterThan(1000);
+        expect(numPixels.white).toBeGreaterThan(5000);
+        if (noOtherPixels) {
+          expect(numPixels.other).toEqual(0);
+        } else {
+          expect(numPixels.other).toBeGreaterThan(1000);
+        }
+
+        canvasFactory.destroy(canvasAndCtx);
+      }
+
+      // We need to re-use a single worker for both documents,
+      // and set `useWorkerFetch = false`, to trigger the bug.
+      const worker = isNodeJS ? null : new PDFWorker();
+
+      // PDF document with a JPEG 2000 image, triggering Wasm-decoding.
+      const loadingTask1 = getDocument(
+        buildGetDocumentParams("issue19326.pdf", {
+          useWorkerFetch: false,
+          worker,
+        })
+      );
+      const pdfDoc1 = await loadingTask1.promise;
+      await pdfDoc1.getDownloadInfo();
+
+      // PDF document without any images, but with path-rendering.
+      const loadingTask2 = getDocument(
+        buildGetDocumentParams("clippath.pdf", {
+          useWorkerFetch: false,
+          worker,
+        })
+      );
+      const pdfDoc2 = await loadingTask2.promise;
+      await pdfDoc2.getDownloadInfo();
+
+      await renderPage(pdfDoc2, /* noOtherPixels = */ true);
+      await loadingTask2.destroy();
+
+      await renderPage(pdfDoc1, /* noOtherPixels = */ false);
+      await loadingTask1.destroy();
     });
   });
 
@@ -8936,6 +9261,53 @@ small scripts as well as for`);
         pdfDoc = await loadingTask.promise;
         const attachments = await pdfDoc.getAttachments();
         expect(Array.from(attachments.keys()).sort()).toEqual(["名", "名_1"]);
+        await loadingTask.destroy();
+      });
+
+      it("keeps the deleted trailing pages out after restoring the page order (issue 21971)", async function () {
+        let loadingTask = getDocument(
+          buildGetDocumentParams("three_pages_with_number.pdf")
+        );
+        let pdfDoc = await loadingTask.promise;
+        const { pagesMapper } = pdfDoc;
+
+        // Delete page 3, then swap the remaining pages twice to restore [1, 2].
+        pagesMapper.deletePages([3]);
+        pagesMapper.cleanSavedData();
+        pagesMapper.movePages(new Set([2]), [2], 0);
+        pagesMapper.movePages(new Set([2]), [2], 0);
+        expect(pagesMapper.getMapping()).toEqual(new Uint32Array([1, 2]));
+        expect(pagesMapper.hasBeenAltered()).toBeTrue();
+
+        const { pageInfos, copyLevels } = pagesMapper.getPageMappingForSaving();
+        const data = await pdfDoc.extractPages(pageInfos, copyLevels);
+        await loadingTask.destroy();
+
+        loadingTask = getDocument({ data });
+        pdfDoc = await loadingTask.promise;
+        expect(pdfDoc.numPages).toEqual(2);
+
+        for (let i = 1; i <= 2; i++) {
+          const pdfPage = await pdfDoc.getPage(i);
+          const { items: textItems } = await pdfPage.getTextContent();
+          expect(mergeText(textItems)).withContext(`Page ${i}`).toEqual(`${i}`);
+        }
+
+        await loadingTask.destroy();
+      });
+
+      it("drops the mapping when moving pages back to the original order", async function () {
+        const loadingTask = getDocument(
+          buildGetDocumentParams("three_pages_with_number.pdf")
+        );
+        const pdfDoc = await loadingTask.promise;
+        const { pagesMapper } = pdfDoc;
+
+        pagesMapper.movePages(new Set([3]), [3], 0);
+        expect(pagesMapper.hasBeenAltered()).toBeTrue();
+        pagesMapper.movePages(new Set([1]), [1], 3);
+        expect(pagesMapper.hasBeenAltered()).toBeFalse();
+
         await loadingTask.destroy();
       });
     });
