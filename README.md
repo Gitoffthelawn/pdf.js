@@ -1,4 +1,4 @@
-# PDF.js [![CI](https://github.com/mozilla/pdf.js/actions/workflows/ci.yml/badge.svg?query=branch%3Amaster)](https://github.com/mozilla/pdf.js/actions/workflows/ci.yml?query=branch%3Amaster) [![codecov](https://codecov.io/gh/mozilla/pdf.js/branch/master/graph/badge.svg)](https://codecov.io/gh/mozilla/pdf.js) [![Reference images](https://img.shields.io/endpoint?url=https%3A%2F%2Fmozilla.github.io%2Fpdf.js.refs%2Fmakeref-badge.json)](https://github.com/mozilla/pdf.js.refs/commits/main)
+# PDF.js [![CI](https://github.com/mozilla/pdf.js/actions/workflows/ci.yml/badge.svg?query=branch%3Amaster)](https://github.com/mozilla/pdf.js/actions/workflows/ci.yml?query=branch%3Amaster) [![codecov](https://codecov.io/gh/mozilla/pdf.js/branch/master/graph/badge.svg)](https://codecov.io/gh/mozilla/pdf.js) [![Reference images](https://img.shields.io/endpoint?url=https%3A%2F%2Fmozilla.github.io%2Fpdf.js.refs%2Fmakeref-badge.json)](https://github.com/mozilla/pdf.js.refs/commits/main) [![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/mozilla/pdf.js?utm_source=badge)
 
 [PDF.js](https://mozilla.github.io/pdf.js/) is a Portable Document Format (PDF) viewer that is built with HTML5.
 
@@ -175,6 +175,19 @@ types can be told apart:
 | `unit_tests.yml` | `unittest` | `unittest` |
 | `integration_tests.yml` | `integrationtest` | `integrationtest` |
 | `coverage_browser_tests.yml` | `botbrowsertest` | `browsertest` |
+
+## Benchmarks
+
+Run the benchmarks in `test/benchmarks/` locally:
+
+    $ npx gulp benchmark
+
+To compare with `master`:
+
+    $ git checkout master
+    $ npx gulp benchmark --output-json build/bench-master.json
+    $ git checkout my-branch
+    $ npx gulp benchmark --compare build/bench-master.json
 
 ## Using PDF.js in a web application
 
