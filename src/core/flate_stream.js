@@ -269,8 +269,9 @@ class FlateStream extends DecodeStream {
           }
 
           // fill the table entries
+          const entry = (len << 16) | val;
           for (i = code2; i < size; i += skip) {
-            codes[i] = (len << 16) | val;
+            codes[i] = entry;
           }
           ++code;
         }
@@ -434,7 +435,7 @@ class FlateStream extends DecodeStream {
           buffer = this.ensureBuffer(pos + len);
           limit = buffer.length;
         }
-        if (len < dist) {
+        if (len <= dist) {
           // When the old and new data doesn't overlap we can use `copyWithin`,
           // since that's faster than a manual loop.
           const startPos = pos - dist;

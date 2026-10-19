@@ -50,7 +50,9 @@ import {
   RenderTask,
 } from "../../src/display/api.js";
 import { isSameOrigin, StatTimer } from "../../src/display/api_utils.js";
+import { Lexer, Parser } from "../../src/core/parser.js";
 import { AutoPrintRegExp } from "../../web/ui_utils.js";
+import { CipherTransformFactory } from "../../src/core/crypto.js";
 import { fetchData as fetchDataDOM } from "../../src/display/dom_utils.js";
 import { GlobalImageCache } from "../../src/core/image_utils.js";
 import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
@@ -58,7 +60,9 @@ import { MessageHandler } from "../../src/shared/message_handler.js";
 import { Metadata } from "../../src/display/metadata.js";
 import { PageViewport } from "../../src/display/page_viewport.js";
 import { RenderingCancelledException } from "../../src/display/display_utils.js";
+import { StringStream } from "../../src/core/stream.js";
 
+const RENDERER_SRC = "../../build/generic/build/pdf.renderer.mjs";
 const WORKER_SRC = "../../build/generic/build/pdf.worker.mjs";
 
 describe("api", function () {
@@ -104,7 +108,7 @@ describe("api", function () {
     return count;
   }
 
-  function assemblePdf(objects) {
+  function assemblePdf(objects, trailerEntries = "") {
     let pdf = "%PDF-1.7\n";
     const offsets = [];
     for (const obj of objects) {
@@ -118,7 +122,7 @@ describe("api", function () {
       pdf += `${offset.toString().padStart(10, "0")} 00000 n \n`;
     }
     pdf +=
-      `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n` +
+      `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R ${trailerEntries}>>\n` +
       `startxref\n${xrefOffset}\n%%EOF\n`;
     return stringToBytes(pdf);
   }
@@ -1472,15 +1476,31 @@ describe("api", function () {
   });
 
   describe("GlobalWorkerOptions", function () {
-    let savedGlobalWorkerPort;
+    let savedGlobalWorkerPort, savedGlobalRendererPorts;
 
     beforeAll(function () {
       savedGlobalWorkerPort = GlobalWorkerOptions.workerPort;
+      savedGlobalRendererPorts = GlobalWorkerOptions.rendererPorts;
     });
 
     afterAll(function () {
       GlobalWorkerOptions.workerPort = savedGlobalWorkerPort;
+      GlobalWorkerOptions.rendererPorts = savedGlobalRendererPorts;
     });
+
+    async function renderFirstPage(pdfDoc) {
+      const page = await pdfDoc.getPage(1);
+      const viewport = page.getViewport({ scale: 0.5 });
+      const { canvasFactory } = pdfDoc;
+      const canvasAndCtx = canvasFactory.create(
+        viewport.width,
+        viewport.height
+      );
+      const renderTask = page.render({ canvas: canvasAndCtx.canvas, viewport });
+      await renderTask.promise;
+      canvasFactory.destroy(canvasAndCtx);
+      return renderTask.isWorkerRendering;
+    }
 
     it("use global `workerPort` with multiple, sequential, documents", async function () {
       if (isNodeJS) {
@@ -1554,6 +1574,140 @@ describe("api", function () {
         await destroyPromise;
       }
     );
+
+    it("use global `rendererPorts` with multiple, sequential, documents", async function () {
+      if (isNodeJS) {
+        pending("Worker is not supported in Node.js.");
+      }
+      const rendererPort = new Worker(new URL(RENDERER_SRC, window.location), {
+        type: "module",
+      });
+      GlobalWorkerOptions.rendererPorts = [rendererPort];
+
+      for (const params of [
+        basicApiGetDocumentParams,
+        tracemonkeyGetDocumentParams,
+      ]) {
+        const loadingTask = getDocument(params);
+        const pdfDoc = await loadingTask.promise;
+        expect(loadingTask._rendererWorker.port).toBe(rendererPort);
+        expect(await renderFirstPage(pdfDoc)).toBeTrue();
+        await loadingTask.destroy();
+      }
+
+      GlobalWorkerOptions.rendererPorts = [];
+      rendererPort.terminate();
+    });
+
+    it("use global `rendererPorts` with multiple, parallel, documents", async function () {
+      if (isNodeJS) {
+        pending("Worker is not supported in Node.js.");
+      }
+      const rendererPorts = Array.from(
+        { length: 2 },
+        () =>
+          new Worker(new URL(RENDERER_SRC, window.location), { type: "module" })
+      );
+      GlobalWorkerOptions.rendererPorts = rendererPorts;
+
+      const loadingTasks = [
+        basicApiGetDocumentParams,
+        tracemonkeyGetDocumentParams,
+        basicApiGetDocumentParams,
+      ].map(params => getDocument(params));
+      expect(loadingTasks[0]._rendererWorker.port).toBe(rendererPorts[0]);
+      expect(loadingTasks[1]._rendererWorker.port).toBe(rendererPorts[1]);
+      // Both supplied workers are busy.
+      expect(loadingTasks[2]._rendererWorker.port).toBeNull();
+
+      const pdfDocs = await Promise.all(loadingTasks.map(task => task.promise));
+      const workerRendering = await Promise.all(pdfDocs.map(renderFirstPage));
+      expect(workerRendering).toEqual([true, true, true]);
+
+      await Promise.all(loadingTasks.map(task => task.destroy()));
+      GlobalWorkerOptions.rendererPorts = [];
+      for (const rendererPort of rendererPorts) {
+        rendererPort.terminate();
+      }
+    });
+
+    it("avoid using a global `rendererPorts` worker which failed to load", async function () {
+      if (isNodeJS) {
+        pending("Worker is not supported in Node.js.");
+      }
+      const brokenSrc = URL.createObjectURL(
+        new Blob(["throw new Error('Broken renderer');"], {
+          type: "text/javascript",
+        })
+      );
+      const brokenPort = new Worker(brokenSrc, { type: "module" });
+      // Suppress the expected startup error.
+      brokenPort.addEventListener("error", evt => evt.preventDefault());
+      GlobalWorkerOptions.rendererPorts = [brokenPort];
+
+      const loadingTask1 = getDocument(basicApiGetDocumentParams);
+      const pdfDoc1 = await loadingTask1.promise;
+      const rendererWorker1 = loadingTask1._rendererWorker;
+      await expectAsync(rendererWorker1.promise).toBeRejectedWithError(
+        /Broken renderer/
+      );
+      expect(rendererWorker1.destroyed).toBeTrue();
+      expect(await renderFirstPage(pdfDoc1)).toBeFalse();
+      await loadingTask1.destroy();
+
+      const loadingTask2 = getDocument(basicApiGetDocumentParams);
+      const pdfDoc2 = await loadingTask2.promise;
+      expect(loadingTask2._rendererWorker.port).toBeNull();
+      expect(await renderFirstPage(pdfDoc2)).toBeTrue();
+      await loadingTask2.destroy();
+
+      GlobalWorkerOptions.rendererPorts = [];
+      brokenPort.terminate();
+      URL.revokeObjectURL(brokenSrc);
+    });
+
+    it("stop waiting for a global `rendererPorts` worker which failed before being used", async function () {
+      if (isNodeJS) {
+        pending("Worker is not supported in Node.js.");
+      }
+      const brokenSrc = URL.createObjectURL(
+        new Blob(["throw new Error('Broken renderer');"], {
+          type: "text/javascript",
+        })
+      );
+      const brokenPort = new Worker(brokenSrc, { type: "module" });
+      await new Promise(resolve => {
+        brokenPort.addEventListener("error", evt => {
+          evt.preventDefault();
+          resolve();
+        });
+      });
+      GlobalWorkerOptions.rendererPorts = [brokenPort];
+
+      jasmine.clock().install();
+      const loadingTask1 = getDocument(basicApiGetDocumentParams);
+      // Expire the connection timeout.
+      jasmine.clock().tick(60000);
+      jasmine.clock().uninstall();
+
+      const pdfDoc1 = await loadingTask1.promise;
+      const rendererWorker1 = loadingTask1._rendererWorker;
+      await expectAsync(rendererWorker1.promise).toBeRejectedWithError(
+        /Connection timed out/
+      );
+      expect(rendererWorker1.destroyed).toBeTrue();
+      expect(await renderFirstPage(pdfDoc1)).toBeFalse();
+      await loadingTask1.destroy();
+
+      const loadingTask2 = getDocument(basicApiGetDocumentParams);
+      await loadingTask2.promise;
+      expect(loadingTask2._rendererWorker.port).toBeNull();
+      await loadingTask2.destroy();
+
+      GlobalWorkerOptions.rendererPorts = [];
+      brokenPort.terminate();
+      URL.revokeObjectURL(brokenSrc);
+    });
   });
 
   describe("PDFDocument", function () {
@@ -7309,9 +7463,6 @@ have written that much by now. So, here’s to squashing bugs.`);
     });
 
     it("should Wasm-decode images if multiple PDFs are parsed in parallel in one worker (issue 22131)", async function () {
-      if (isNodeJS) {
-        pending("Worker is not supported in Node.js.");
-      }
       const BLACK = FeatureTest.isLittleEndian ? 0xff000000 : 0x000000ff,
         WHITE = 0xffffffff;
 
@@ -7390,6 +7541,85 @@ have written that much by now. So, here’s to squashing bugs.`);
 
       await renderPage(pdfDoc1, /* noOtherPixels = */ false);
       await loadingTask1.destroy();
+    });
+
+    it("should Wasm-decode images after extracting pages from PDF data, if multiple PDFs are parsed in one worker (PR 22186)", async function () {
+      if (isNodeJS) {
+        // Fake workers can reuse Wasm bytes cached by earlier tests.
+        pending("Worker is not supported in Node.js.");
+      }
+      // Share a worker and fetch Wasm through document message handlers.
+      const worker = new PDFWorker();
+
+      // This PDF contains a JPEG 2000 image.
+      const loadingTask1 = getDocument(
+        buildGetDocumentParams("issue19326.pdf", {
+          useWorkerFetch: false,
+          worker,
+        })
+      );
+      const pdfDoc1 = await loadingTask1.promise;
+
+      const loadingTask2 = getDocument(
+        buildGetDocumentParams("clippath.pdf", {
+          useWorkerFetch: false,
+          worker,
+        })
+      );
+      const pdfDoc2 = await loadingTask2.promise;
+
+      // Temporary extraction managers share their parent document's handler.
+      // Terminating them must preserve the parent's handler.
+      const pdfData = await DefaultFileReaderFactory.fetch({
+        path: TEST_PDFS_PATH + "doc_1_3_pages.pdf",
+      });
+      for (const pdfDoc of [pdfDoc1, pdfDoc2]) {
+        const data = await pdfDoc.extractPages([{ document: pdfData }]);
+        expect(data.length).toBeGreaterThan(0);
+      }
+      await loadingTask2.destroy();
+
+      // Check the Wasm request reaches pdfDoc1; JS fallback can hide failures.
+      const fetchSpy = spyOn(
+        pdfDoc1._transport.binaryDataFactory,
+        "fetch"
+      ).and.callThrough();
+
+      const pdfPage = await pdfDoc1.getPage(1);
+      const viewport = pdfPage.getViewport({ scale: 1 });
+      const { canvasFactory } = pdfDoc1;
+      const canvasAndCtx = canvasFactory.create(
+        viewport.width,
+        viewport.height
+      );
+      const renderTask = pdfPage.render({
+        canvas: canvasAndCtx.canvas,
+        viewport,
+      });
+      await renderTask.promise;
+
+      expect(fetchSpy).toHaveBeenCalledWith({
+        kind: "wasmUrl",
+        filename: "openjpeg.wasm",
+      });
+
+      // The decoded image contributes pixels other than black and white.
+      const BLACK = FeatureTest.isLittleEndian ? 0xff000000 : 0x000000ff,
+        WHITE = 0xffffffff;
+      let numOtherPixels = 0;
+      for (const p of new Uint32Array(
+        canvasAndCtx.context.getImageData(0, 0, viewport.width, viewport.height)
+          .data.buffer
+      )) {
+        if (p !== BLACK && p !== WHITE) {
+          numOtherPixels++;
+        }
+      }
+      expect(numOtherPixels).toBeGreaterThan(1000);
+
+      canvasFactory.destroy(canvasAndCtx);
+      await loadingTask1.destroy();
+      worker.destroy();
     });
   });
 
@@ -8209,6 +8439,117 @@ small scripts as well as for`);
         await newLoadingTask.destroy();
       });
 
+      it("serializes indirect strings outside of object streams", async function () {
+        const alt = "Hello (world)\\ with a newline\n";
+        const password = "123456";
+        // R=3 parameters from crypto_spec.js (dict1, fileId1).
+        const fileId = "\xf6\xc6\xaf\x17\xf3rR\x8dRM\x9a\x80\xd1\xef\xdf\x18";
+        const fileIdHex = stringToBytes(fileId).toHex();
+        const encryptDict =
+          "<< /Filter /Standard /V 2 /Length 128 /R 3 /P -1028 " +
+          "/O <80c30496916f20736c3ae61b135491f20d5612e3ff5ebbe9564fd86b9aca7c5d> " +
+          "/U <6a0c8d3e591900bc6a647d91bdaa001800000000000000000000000000000000> >>";
+
+        for (const encrypted of [false, true]) {
+          const ctx = encrypted ? "encrypted" : "unencrypted";
+          let value = alt;
+          let trailerEntries = "";
+          if (encrypted) {
+            const parser = new Parser({
+              lexer: new Lexer(new StringStream(encryptDict)),
+            });
+            const encrypt = new CipherTransformFactory(
+              parser.getObj(),
+              fileId,
+              password
+            );
+            value = encrypt.createCipherTransform(6, 0).encryptString(alt);
+            trailerEntries = `/Encrypt 8 0 R /ID [<${fileIdHex}> <${fileIdHex}>] `;
+          }
+          const objects = [
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R " +
+              "/StructTreeRoot 4 0 R >>\nendobj\n",
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /StructParents 0 " +
+              "/MediaBox [0 0 100 100] >>\nendobj\n",
+            "4 0 obj\n<< /Type /StructTreeRoot /K [5 0 R] " +
+              "/ParentTree 7 0 R /ParentTreeNextKey 1 >>\nendobj\n",
+            // This /Alt string is copied after page object streams are built.
+            "5 0 obj\n<< /Type /StructElem /S /Figure /P 4 0 R /Pg 3 0 R " +
+              "/Alt 6 0 R /K 0 >>\nendobj\n",
+            `6 0 obj\n<${stringToBytes(value).toHex()}>\nendobj\n`,
+            "7 0 obj\n<< /Nums [0 [5 0 R]] >>\nendobj\n",
+          ];
+          if (encrypted) {
+            objects.push(`8 0 obj\n${encryptDict}\nendobj\n`);
+          }
+          const loadingTask = getDocument({
+            data: assemblePdf(objects, trailerEntries),
+            password,
+          });
+          const pdfDoc = await loadingTask.promise;
+          const page = await pdfDoc.getPage(1);
+          expect((await page.getStructTree()).children[0].alt)
+            .withContext(ctx)
+            .toEqual(alt);
+          const data = await pdfDoc.extractPages([{ document: null }]);
+          expect(countMarker(data, "/Encrypt"))
+            .withContext(ctx)
+            .toEqual(encrypted ? 1 : 0);
+          expect(countMarker(data, "Hello"))
+            .withContext(ctx)
+            .toEqual(encrypted ? 0 : 1);
+          await loadingTask.destroy();
+
+          const newLoadingTask = getDocument({ data, password });
+          const newPdfDoc = await newLoadingTask.promise;
+          expect(newPdfDoc.numPages).withContext(ctx).toEqual(1);
+          const newPage = await newPdfDoc.getPage(1);
+          const tree = await newPage.getStructTree();
+          expect(tree.children.length).withContext(ctx).toEqual(1);
+          expect(tree.children[0].role).withContext(ctx).toEqual("Figure");
+          expect(tree.children[0].alt).withContext(ctx).toEqual(alt);
+          await newLoadingTask.destroy();
+        }
+      });
+
+      it("drops the conformance declarations from the document info", async function () {
+        const loadingTask = getDocument({
+          data: assemblePdf(
+            [
+              "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+              "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+              "3 0 obj\n<< /Type /Page /Parent 2 0 R " +
+                "/MediaBox [0 0 100 100] >>\nendobj\n",
+              "4 0 obj\n<< /Title (Test) /GTS_PDFXVersion (PDF/X-4) " +
+                "/GTS_PDFXConformance (PDF/X-1a:2001) " +
+                "/ISO_PDFEVersion (PDF/E-1) /Custom (Value) >>\nendobj\n",
+            ],
+            "/Info 4 0 R "
+          ),
+        });
+        const pdfDoc = await loadingTask.promise;
+        const { info } = await pdfDoc.getMetadata();
+        expect(info.Custom).toEqual(
+          new Map([
+            ["GTS_PDFXVersion", "PDF/X-4"],
+            ["GTS_PDFXConformance", "PDF/X-1a:2001"],
+            ["ISO_PDFEVersion", "PDF/E-1"],
+            ["Custom", "Value"],
+          ])
+        );
+
+        const data = await pdfDoc.extractPages([{ document: null }]);
+        await loadingTask.destroy();
+
+        const newLoadingTask = getDocument({ data });
+        const newPdfDoc = await newLoadingTask.promise;
+        const { info: newInfo } = await newPdfDoc.getMetadata();
+        expect(newInfo.Title).toEqual("Test");
+        expect(newInfo.Custom).toEqual(new Map([["Custom", "Value"]]));
+        await newLoadingTask.destroy();
+      });
+
       it("should merge two PDFs with page included ranges", async function () {
         const loadingTask = getDocument(
           buildGetDocumentParams("tracemonkey.pdf")
@@ -8329,6 +8670,70 @@ small scripts as well as for`);
 
         await newLoadingTask.destroy();
         await loadingTask.destroy();
+      });
+
+      it("should skip invalid documents when merging PDFs", async function () {
+        const loadingTask = getDocument(
+          buildGetDocumentParams("doc_1_3_pages.pdf")
+        );
+        const pdfDoc = await loadingTask.promise;
+        const pdfData2 = await DefaultFileReaderFactory.fetch({
+          path: TEST_PDFS_PATH + "doc_2_3_pages.pdf",
+        });
+
+        const data = await pdfDoc.extractPages([
+          { document: null },
+          { document: stringToBytes("This is not a PDF file.") },
+          { document: pdfData2 },
+        ]);
+        const newLoadingTask = getDocument({ data });
+        const newPdfDoc = await newLoadingTask.promise;
+        expect(newPdfDoc.numPages).toEqual(6);
+
+        for (let i = 1; i <= 6; i++) {
+          const pdfPage = await newPdfDoc.getPage(i);
+          const { items: textItems } = await pdfPage.getTextContent();
+          expect(mergeText(textItems)).toEqual(
+            `Document ${Math.ceil(i / 3)}:Page ${((i - 1) % 3) + 1}`
+          );
+        }
+
+        await newLoadingTask.destroy();
+        await loadingTask.destroy();
+      });
+
+      it("should skip pure XFA documents when merging PDFs", async function () {
+        const xfaData = await DefaultFileReaderFactory.fetch({
+          path: TEST_PDFS_PATH + "xfa_issue14315.pdf",
+        });
+
+        for (const enableXfa of [false, true]) {
+          const loadingTask = getDocument(
+            buildGetDocumentParams("doc_1_3_pages.pdf", { enableXfa })
+          );
+          const pdfDoc = await loadingTask.promise;
+
+          const data = await pdfDoc.extractPages([
+            { document: null },
+            { document: xfaData },
+          ]);
+          const newLoadingTask = getDocument({ data });
+          const newPdfDoc = await newLoadingTask.promise;
+          expect(newPdfDoc.numPages)
+            .withContext(`enableXfa: ${enableXfa}`)
+            .toEqual(3);
+
+          for (let i = 1; i <= 3; i++) {
+            const pdfPage = await newPdfDoc.getPage(i);
+            const { items: textItems } = await pdfPage.getTextContent();
+            expect(mergeText(textItems))
+              .withContext(`enableXfa: ${enableXfa}, page ${i}`)
+              .toEqual(`Document 1:Page ${i}`);
+          }
+
+          await newLoadingTask.destroy();
+          await loadingTask.destroy();
+        }
       });
     });
 

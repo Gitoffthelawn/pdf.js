@@ -196,6 +196,15 @@ describe("PostScript Type 4 lexer, parser, and Wasm compiler", function () {
         "PostScript function: a procedure block must be followed by 'if' or '{…} ifelse'."
       );
     });
+
+    it("throws when procedures are nested too deeply", function () {
+      const nested = n => `{ ${"true { ".repeat(n)}${"} if ".repeat(n)}}`;
+      expect(() => parsePostScriptFunction(nested(1000))).not.toThrow();
+      expect(() => parsePostScriptFunction(nested(1001))).toThrowError(
+        FormatError,
+        "PostScript function: procedures are nested too deeply."
+      );
+    });
   });
 
   // Wasm compiler.
@@ -836,6 +845,69 @@ describe("PostScript Type 4 lexer, parser, and Wasm compiler", function () {
       expect(r).toBeCloseTo(-6, 9);
     });
 
+    it("interprets boolean and integer not", function () {
+      const fn = src => {
+        const interpFn = buildPostScriptJsFunction(
+          src,
+          [-8, 8],
+          [-8, 8],
+          /* forceInterpreter = */ true
+        );
+        const dest = new Float64Array(1);
+        interpFn(new Float64Array([0]), 0, dest, 0);
+        return dest[0];
+      };
+      expect(fn("{ pop 0 not }")).toEqual(-1);
+      expect(fn("{ pop 1 not }")).toEqual(-2);
+      expect(fn("{ pop false not }")).toEqual(1);
+      expect(fn("{ 0.5 lt not }")).toEqual(0);
+      expect(fn("{ pop 1 2 or not }")).toEqual(-4);
+      expect(fn("{ pop true false or not }")).toEqual(0);
+      // Stack operations preserve types.
+      expect(fn("{ pop 0 false exch not exch pop }")).toEqual(-1);
+      expect(fn("{ pop false 0 exch not exch pop }")).toEqual(1);
+      expect(fn("{ pop false 0 index not exch pop }")).toEqual(1);
+      expect(fn("{ pop false 0 0 3 2 roll not 3 1 roll pop pop }")).toEqual(1);
+    });
+
+    it("interprets not when its operand type is unknown at compile time", function () {
+      const src = "{ dup 0.6 gt { true } { 0 } ifelse not exch pop }";
+      expect(buildPostScriptWasmFunction(src, [0, 1], [-1, 1])).toBeNull();
+      const jsFn = buildPostScriptJsFunction(src, [0, 1], [-1, 1]);
+      const dest = new Float64Array(1);
+      jsFn(new Float64Array([0.5]), 0, dest, 0);
+      expect(dest[0]).toEqual(-1);
+      jsFn(new Float64Array([0.7]), 0, dest, 0);
+      expect(dest[0]).toEqual(0);
+    });
+
+    it("compares booleans and numbers with eq and ne", function () {
+      expect(compileAndRun("{ pop 0 false eq }", [0, 1], [0, 1], [0.5])).toBe(
+        0
+      );
+      expect(compileAndRun("{ pop 1 true ne }", [0, 1], [0, 1], [0.5])).toBe(1);
+      expect(
+        compileAndRun("{ dup 0.5 gt 0 eq exch pop }", [0, 1], [0, 1], [0.3])
+      ).toBe(0);
+      expect(
+        compileAndRun("{ dup 0.5 gt 1 ne exch pop }", [0, 1], [0, 1], [0.7])
+      ).toBe(1);
+      expect(
+        compileAndRun("{ dup 0.5 gt true eq exch pop }", [0, 1], [0, 1], [0.7])
+      ).toBe(1);
+    });
+
+    it("interprets eq when an operand type is unknown at compile time", function () {
+      const src = "{ dup 0.6 gt { true } { 1 } ifelse 1 eq exch pop }";
+      expect(buildPostScriptWasmFunction(src, [0, 1], [0, 1])).toBeNull();
+      const jsFn = buildPostScriptJsFunction(src, [0, 1], [0, 1]);
+      const dest = new Float64Array(1);
+      jsFn(new Float64Array([0.5]), 0, dest, 0);
+      expect(dest[0]).toEqual(1);
+      jsFn(new Float64Array([0.7]), 0, dest, 0);
+      expect(dest[0]).toEqual(0);
+    });
+
     // _compileNodeAsBoolI32 — ternary condition optimizations.
 
     it("ifelse with comparison condition (true branch)", async function () {
@@ -1323,6 +1395,90 @@ describe("PostScript Type 4 lexer, parser, and Wasm compiler", function () {
     it("fails cleanly on ifelse without a condition value", function () {
       const out = toTree("{ { 1 } { 2 } ifelse }", 0);
       expect(out).toBeNull();
+    });
+
+    it("limits work from successive stack-growing ifs", function () {
+      // Each guard forks the remaining evaluation, doubling the paths.
+      const src = `{ ${"dup { dup } if ".repeat(40)}}`;
+      expect(toTree(src, 1)).toBeNull();
+      expect(buildPostScriptWasmFunction(src, [0, 1], [0, 1])).toBeNull();
+
+      const fn = buildPostScriptJsFunction(src, [0, 1], [0, 1]);
+      const dest = new Float64Array(1);
+      fn(new Float64Array([0.5]), 0, dest, 0);
+      expect(dest[0]).toEqual(0.5);
+    });
+
+    it("gives up on deeply nested stack-growing ifs", function () {
+      // `pop` restores the stack depth on the true path, allowing deep forks
+      // without exceeding the stack size limit.
+      const src = `{ ${"dup { dup } if pop ".repeat(50000)}}`;
+      expect(toTree(src, 1)).toBeNull();
+    });
+
+    it("gives up comparing large structurally equal expressions", function () {
+      // Each chain shares its operands; comparing the two distinct DAGs
+      // would take exponential work without a limit.
+      const square = "dup mul ".repeat(40);
+      expect(toTree(`{ dup ${square} exch ${square} sub }`, 1)).toBeNull();
+    });
+
+    it("gives up on too deep expressions", function () {
+      // Reject deep outputs and operands before recursive tree traversal.
+      const chain = "sin ".repeat(12000);
+      const src = `{ ${chain} }`;
+      expect(toTree(src, 1)).toBeNull();
+      expect(buildPostScriptWasmFunction(src, [0, 1], [-1, 1])).toBeNull();
+
+      const cmpSrc = `{ dup ${chain} exch ${chain} sub }`;
+      expect(toTree(cmpSrc, 1)).toBeNull();
+      expect(buildPostScriptWasmFunction(cmpSrc, [0, 1], [-1, 1])).toBeNull();
+
+      const fn = buildPostScriptJsFunction(cmpSrc, [0, 1], [-1, 1]);
+      const dest = new Float64Array(1);
+      fn(new Float64Array([0.5]), 0, dest, 0);
+      expect(dest[0]).toEqual(0);
+    });
+
+    it("handles combined procedure, fork and expression depths", function () {
+      const dest = new Float64Array(1);
+
+      // Approach all three depth limits in the same evaluation.
+      const chain = "sin ".repeat(499);
+      const src =
+        `{ ${"true { ".repeat(999)}${"dup { dup } if pop ".repeat(999)}` +
+        `dup dup ${chain} exch ${chain} sub pop ${"} if ".repeat(999)}}`;
+      expect(toTree(src, 1)).toBeNull();
+      const fn = buildPostScriptJsFunction(src, [0, 1], [0, 1]);
+      fn(new Float64Array([0.5]), 0, dest, 0);
+      expect(dest[0]).toEqual(0.5);
+
+      // Nested `ifelse` blocks exceed the expression depth limit.
+      const ifElseSrc =
+        `{ ${"dup 0.5 lt { 1 } { ".repeat(1000)}0` +
+        `${" } ifelse".repeat(1000)} exch pop }`;
+      expect(toTree(ifElseSrc, 1)).toBeNull();
+      const ifElseFn = buildPostScriptJsFunction(ifElseSrc, [0, 1], [0, 1]);
+      ifElseFn(new Float64Array([0.3]), 0, dest, 0);
+      expect(dest[0]).toEqual(1);
+      ifElseFn(new Float64Array([0.7]), 0, dest, 0);
+      expect(dest[0]).toEqual(0);
+    });
+
+    it("keeps the results of not, eq and ne when exceeding the work limit", function () {
+      const square = "dup mul ".repeat(17);
+      const fn = tail => {
+        const src = `{ dup dup ${square} exch ${square} sub pop ${tail} }`;
+        expect(toTree(src, 1)).toBeNull();
+        const jsFn = buildPostScriptJsFunction(src, [0, 1], [-1, 1]);
+        const dest = new Float64Array(1);
+        jsFn(new Float64Array([0.5]), 0, dest, 0);
+        return dest[0];
+      };
+      expect(fn("pop 0 not")).toEqual(-1);
+      expect(fn("pop 0 false eq")).toEqual(0);
+      expect(fn("pop 0 false ne")).toEqual(1);
+      expect(fn("0.5 gt 0 eq")).toEqual(0);
     });
 
     // Optimisations
