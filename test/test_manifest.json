@@ -2696,7 +2696,7 @@
     "md5": "0759ec46739b13bb0b66170a18d33d4f",
     "rounds": 1,
     "link": true,
-    "firstPage": 13,
+    "firstPage": 2,
     "type": "eq",
     "partial": {
       "minX": 0.25,
@@ -14750,5 +14750,46 @@
     "type": "eq",
     "annotations": true,
     "about": "NoRotate FreeText annotation on a page with /Rotate 270."
+  },
+  {
+    "id": "type3_d0_alpha",
+    "file": "pdfs/type3_d0_alpha.pdf",
+    "md5": "f0273a0ba9c41b5f5033ca86fff062f0",
+    "rounds": 1,
+    "type": "eq",
+    "about": "Colored Type3 glyph followed by a semi-transparent stroke and fill."
+  },
+  {
+    "id": "tiling_pattern_cell_state",
+    "file": "pdfs/tiling_pattern_cell_state.pdf",
+    "md5": "90b0372ae9280cb46a723ad549f01bfc",
+    "rounds": 1,
+    "type": "eq",
+    "about": "Single-tile pattern fills after setting the line width, the dash and the stroke alpha."
+  },
+  {
+    "id": "issue_cmap12",
+    "file": "pdfs/issue_cmap12.pdf",
+    "md5": "5132041f6b20cc46d87e3776c61e56fe",
+    "rounds": 1,
+    "link": false,
+    "type": "load",
+    "about": "Format 12 cmap group spanning 0 to 0xffffffff; must load without exhausting memory."
+  },
+  {
+    "id": "pattern_fill_pending_state",
+    "file": "pdfs/pattern_fill_pending_state.pdf",
+    "md5": "ab250767031b8c1dfc14d8c6728a4b40",
+    "rounds": 1,
+    "type": "eq",
+    "about": "Single-tile patterns with pending clips and even-odd fills."
+  },
+  {
+    "id": "type3_advance",
+    "file": "pdfs/type3_advance.pdf",
+    "md5": "700b0da25aeb1b5d22e5c139d80e86db",
+    "rounds": 1,
+    "type": "eq",
+    "about": "Type3 advances: invisible text, character spacing at negative font sizes, and font matrix translation."
   }
 ]
