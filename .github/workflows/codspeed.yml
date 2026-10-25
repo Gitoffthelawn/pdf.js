@@ -6,6 +6,7 @@ on:
       - "package-lock.json"
       - "src/**"
       - "test/benchmarks/**"
+      - "web/**"
       - ".github/workflows/codspeed.yml"
     branches:
       - master
@@ -15,6 +16,7 @@ on:
       - "package-lock.json"
       - "src/**"
       - "test/benchmarks/**"
+      - "web/**"
       - ".github/workflows/codspeed.yml"
     branches:
       - master
@@ -53,5 +55,5 @@ jobs:
       - name: Run benchmarks
         uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
         with:
-          mode: simulation
+          mode: walltime
           run: npx vitest bench --run --config test/benchmarks/vitest.config.mjs

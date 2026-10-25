@@ -14799,5 +14799,21 @@
     "rounds": 1,
     "type": "eq",
     "about": "CFF font with an accent left of its origin."
+  },
+  {
+    "id": "issue5377",
+    "file": "pdfs/issue5377.pdf",
+    "md5": "3ce78b01d7940d5332117055803fc9a3",
+    "rounds": 1,
+    "type": "eq",
+    "about": "CID-keyed CFF font with 65535 glyphs and a nonempty glyph 0."
+  },
+  {
+    "id": "issue10175",
+    "file": "pdfs/issue10175.pdf",
+    "md5": "98bbb5e9b62c7e6850aec50be249e9e0",
+    "rounds": 1,
+    "type": "eq",
+    "about": "CFF fonts with repeated rmoveto width operands."
   }
 ]

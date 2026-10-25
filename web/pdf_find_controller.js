@@ -731,6 +731,9 @@ class PDFFindController {
         return p5;
       }
     );
+    if (!query) {
+      return [false, ""];
+    }
 
     const trailingSpaces = "[ ]*";
     if (query.endsWith(trailingSpaces)) {
@@ -738,6 +741,16 @@ class PDFFindController {
       // it doesn't make sense to match some whitespaces after the dot
       // when it's the last character.
       query = query.slice(0, query.length - trailingSpaces.length);
+    }
+
+    // Each "+" contributes one required space.
+    query = query.replaceAll(
+      /(?:\[ \][*+]){2,}/g,
+      spaces => `[ ]{${spaces.split("+").length - 1},}`
+    );
+    if (query.startsWith("[ ]")) {
+      // Avoid quadratic retries; keep the last space for diacritic matches.
+      query = `(?:(?<![ ])|(?![ ]{2}))${query}`;
     }
 
     if (matchDiacritics) {
@@ -834,8 +847,9 @@ class PDFFindController {
             hasDiacritics
           );
           isUnicode ||= isUnicodePart;
-          return `(${queryPart})`;
+          return queryPart && `(${queryPart})`;
         })
+        .filter(Boolean)
         .join("|");
     }
     if (!query) {
