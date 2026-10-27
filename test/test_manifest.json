@@ -14815,5 +14815,32 @@
     "rounds": 1,
     "type": "eq",
     "about": "CFF fonts with repeated rmoveto width operands."
+  },
+  {
+    "id": "issue18384",
+    "file": "pdfs/issue18384.pdf",
+    "md5": "835357c094e00a5fcfc26a9a2cef59ba",
+    "rounds": 1,
+    "link": true,
+    "firstPage": 3,
+    "lastPage": 5,
+    "type": "eq",
+    "about": "Rotation fallbacks for non-embedded vertical CID fonts."
+  },
+  {
+    "id": "vertical_rotated_fallback_glyphs",
+    "file": "pdfs/vertical_rotated_fallback_glyphs.pdf",
+    "md5": "1adb3ee6787c7189f316152a1e811eda",
+    "rounds": 1,
+    "type": "eq",
+    "about": "Rotated fallback glyphs with various vertical metrics and font sizes."
+  },
+  {
+    "id": "pattern_text_non_embedded_font",
+    "file": "pdfs/pattern_text_non_embedded_font.pdf",
+    "md5": "bea8f9bf6f267ee7878c604ae9f450d0",
+    "rounds": 1,
+    "type": "eq",
+    "about": "Pattern fill and stroke on scaled fallback glyphs."
   }
 ]
